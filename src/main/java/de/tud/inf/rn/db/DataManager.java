@@ -1,6 +1,7 @@
 package de.tud.inf.rn.db;
 
 import java.sql.*;
+import java.util.HashMap;
 import java.util.Hashtable;
 
 import de.tud.inf.rn.db.orm.Relation;
@@ -85,7 +86,7 @@ public class DataManager {
         }
     }
 
-    public static void deleteRoleRecord(Hashtable<Integer, Object> roles, int roleId){
+    public static void deleteRoleRecord(HashMap<Integer, Object> roles, int roleId){
         Connection con = DBManager.getConnection();
         try{
             String query = "SELECT * FROM Relation WHERE PlayerId=" + roleId;
