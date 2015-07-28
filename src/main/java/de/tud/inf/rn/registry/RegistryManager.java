@@ -17,10 +17,7 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.sql.*;
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.Enumeration;
-import java.util.Hashtable;
+import java.util.*;
 
 /**
  * Created by nguonly role 7/10/15.
@@ -28,9 +25,9 @@ import java.util.Hashtable;
 public class RegistryManager {
     private static RegistryManager m_registryManager;
 
-    private static Hashtable<Integer, Object> m_objects = new Hashtable<>();
-    private static Hashtable<Integer, Object> m_roles = new Hashtable<>();
-    private static Hashtable<Integer, Object> m_compartments = new Hashtable<>();
+    private static HashMap<Integer, Object> m_objects = new HashMap<>();
+    private static HashMap<Integer, Object> m_roles = new HashMap<>();
+    private static HashMap<Integer, Object> m_compartments = new HashMap<>();
 
     private static Deque<Integer> m_activeCompartments = new ArrayDeque<>();
 
@@ -492,10 +489,6 @@ public class RegistryManager {
     public void unbind(Object core, Class role){
         if(log.isDebugEnabled()) {
             log.debug("Before deleting roles in Hashtable");
-            Enumeration<Integer> m = m_roles.keys();
-            while (m.hasMoreElements()) {
-                log.debug(m.nextElement());
-            }
         }
         //Get role Id
         int roleId = DataManager.getIdByName(core.hashCode(), "Role", role.getName());
@@ -504,10 +497,6 @@ public class RegistryManager {
         //test whether roles are removed from m_roles hashtable
         if(log.isDebugEnabled()) {
             log.debug("---------- After deleting roles from both Database and hashtable");
-            Enumeration<Integer> m = m_roles.keys();
-            while (m.hasMoreElements()) {
-                log.debug(m.nextElement());
-            }
         }
     }
 
