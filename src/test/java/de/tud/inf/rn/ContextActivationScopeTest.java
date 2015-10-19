@@ -6,12 +6,14 @@ import de.tud.inf.rn.actor.Role;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.RegistryManager;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.lang.reflect.Method;
+import java.util.ArrayDeque;
 
 /**
  * Created by nguonly role 7/22/15.
@@ -19,13 +21,12 @@ import java.lang.reflect.Method;
 public class ContextActivationScopeTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     public static class RoleA extends Role{
@@ -60,19 +61,12 @@ public class ContextActivationScopeTest {
             p.bind(this, RoleA.class);
         }
 
-        public void activate(){
-
-        }
     }
 
     public static class CompartmentA extends Compartment{
 
         public void bind(){
             p.bind(this, RoleB.class);
-        }
-
-        public void activate(){
-
         }
 
     }
@@ -95,8 +89,6 @@ public class ContextActivationScopeTest {
 
             retValue = p.invoke("getName", String.class);
             Assert.assertEquals(RoleA.class.getSimpleName(), retValue);
-        } catch (Exception e) {
-            e.printStackTrace();
         }
 
     }

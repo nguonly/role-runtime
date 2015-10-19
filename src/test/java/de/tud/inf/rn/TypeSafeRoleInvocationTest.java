@@ -4,7 +4,9 @@ import de.tud.inf.rn.actor.Compartment;
 import de.tud.inf.rn.actor.Player;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
+import de.tud.inf.rn.db.orm.Relation;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.RegistryManager;
 import de.tud.inf.rn.role.Employee;
 import de.tud.inf.rn.role.Student;
 import org.junit.After;
@@ -12,19 +14,20 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.*;
+
 /**
  * Created by nguonly role 7/27/15.
  */
 public class TypeSafeRoleInvocationTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     @Test
@@ -41,5 +44,15 @@ public class TypeSafeRoleInvocationTest {
             Assert.assertEquals(retCourse, p.role(Student.class).takeCourse("Networking"));
             Assert.assertEquals(retAddress, p.role(Employee.class).getAddress());
         }
+    }
+
+    @Test
+    public void testCollection(){
+        Collection<Relation> relations = new ArrayList<>();
+        Deque<Relation> deque = new ArrayDeque<>();
+
+        //relations.stream().filter()
+        HashMap<Integer, Relation> map = new HashMap<>();
+
     }
 }

@@ -6,10 +6,13 @@ import de.tud.inf.rn.actor.Role;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.RegistryManager;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+
+import java.util.ArrayDeque;
 
 /**
  * Created by nguonly role 7/20/15.
@@ -17,13 +20,15 @@ import org.junit.Test;
 public class InvokeWithCompartmentTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+//        SchemaManager.drop();
+//        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        //DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     Person p = Player.initialize(Person.class);

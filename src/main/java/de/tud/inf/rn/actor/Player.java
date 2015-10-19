@@ -1,6 +1,7 @@
 package de.tud.inf.rn.actor;
 
 import de.tud.inf.rn.registry.RegistryManager;
+import de.tud.inf.rn.registry.StatisticsHelper;
 
 /**
  * Created by nguonly role 7/9/15.
@@ -10,18 +11,27 @@ public class Player {
 
     //public int Id;
 
-    //private String m_packageStr = "de.tud.inf.rn.role.%s";
-    //private String m_packageStr = "de.tud.inf.rn.role.%s";
+    /* Bind */
+    public <T extends Role> T bind(Compartment compartment, Class<T> role){
 
-    public Role bind(Compartment compartment, Class role){
-
-        return m_registryManager.bind(compartment, this, role);
+        return m_registryManager.bind(compartment, this, role, null, null);
     }
 
+    public <T extends Role> T bind(Compartment compartment, Class<T> role,
+                                   Class[] constructorArgumentTypes, Object[] constructorArgumentValues){
+        return m_registryManager.bind(compartment, this, role, constructorArgumentTypes, constructorArgumentValues);
 
-    public Role bind(Class role){
+    }
+
+    public <T extends Role> T bind(Class<T> role){
         return bind(null, role);
     }
+
+    public <T extends Role> T bind(Class<T> role, Class[] constructorArgumentTypes, Object[] constructorArgumentValues){
+        return m_registryManager.bind(null, this, role, constructorArgumentTypes, constructorArgumentValues);
+    }
+
+    /* End of Binding */
 
     /* Invoke with implicit compartment */
     public void invoke(String methodName){
@@ -59,40 +69,22 @@ public class Player {
     }
     /* End of Invoke with compartment explicit */
 
-    /* Invoke compartment method */
-    public <T> T invokeCompartment(Compartment compartment, String methodName, Class<T> returnType, Class[] argumentTypes,  Object[] argumentValues){
-        return m_registryManager.invokeCompartment(compartment, true, this, methodName, returnType, argumentTypes, argumentValues);
-    }
-
-    public <T> T invokeCompartment(Compartment compartment, String methodName, Class<T> returnType){
-        return m_registryManager.invokeCompartment(compartment, true, this, methodName, returnType, null, null);
-    }
-
-    public void invokeCompartment(Compartment compartment, String methodName, Class[] argumentTypes, Object[] argumentValues){
-        m_registryManager.invokeCompartment(compartment, true, this, methodName, null, argumentTypes, argumentValues);
-    }
-
-    public void invokeCompartment(Compartment compartment, String methodName){
-        m_registryManager.invokeCompartment(compartment, true, this, methodName, null, null, null);
-    }
-
-    /* End of invoke compartment method */
 
     /* invoke compartment method with current active compartment */
     public <T> T invokeCompartment(String methodName, Class<T> returnType, Class[] arguementTypes,  Object[] argumentValues){
-        return m_registryManager.invokeCompartment(null, true, this, methodName, returnType, arguementTypes, argumentValues);
+        return m_registryManager.invokeCompartment(true, this, methodName, returnType, arguementTypes, argumentValues);
     }
 
     public <T> T invokeCompartment(String methodName, Class<T> returnType){
-        return m_registryManager.invokeCompartment(null, true, this, methodName, returnType, null, null);
+        return m_registryManager.invokeCompartment(true, this, methodName, returnType, null, null);
     }
 
     public void invokeCompartment(String methodName, Class[] argumentType, Object[] argumentValues){
-        m_registryManager.invokeCompartment(null, true, this, methodName, null, argumentType, argumentValues);
+        m_registryManager.invokeCompartment(true, this, methodName, null, argumentType, argumentValues);
     }
 
     public void invokeCompartment(String methodName){
-        m_registryManager.invokeCompartment(null, true, this, methodName, null, null, null);
+        m_registryManager.invokeCompartment(true, this, methodName, null, null, null);
     }
     /* end of invoke compartment method with current active compartment */
 
@@ -117,23 +109,39 @@ public class Player {
      * Transfer
      */
     public void transfer(Class role, Object to){
-        transfer(role, to, null);
+        m_registryManager.transfer(role, this, null, to, null);
     }
 
-    public void transfer(Class role, Object to, Compartment toCompartment){
-        m_registryManager.transfer(role, this, to, toCompartment);
+    public void transfer(Class role, Compartment fromCompartment, Object to, Compartment toCompartment){
+        m_registryManager.transfer(role, this, fromCompartment, to, toCompartment);
     }
 
     public static <T> T initialize(Class<T> player){
 
-        return RegistryManager.getInstance().initializePlayer(player);
+        return RegistryManager.getInstance().initializePlayer(player, null, null);
+    }
+
+    public static <T> T initialize(Class<T> player, Class[] constructorArgumentTypes, Object[] constructorArgumentValues){
+        return RegistryManager.getInstance().initializePlayer(player, constructorArgumentTypes, constructorArgumentValues);
     }
 
     public <T> T role(Compartment compartment, Class<T> roleClass){
-        return m_registryManager.role(compartment, roleClass);
+        return m_registryManager.role(compartment, this, roleClass);
     }
 
     public <T> T role(Class<T> roleClass){
-        return m_registryManager.role(null, roleClass);
+        return m_registryManager.role(null, this, roleClass);
     }
+
+    public Object getCompartment(){
+        return m_registryManager.getCompartment(this);
+    }
+
+    /* Statistics */
+
+    public int rolesCount(){
+        return StatisticsHelper.rolesCount(this.hashCode());
+    }
+
+    /* End of Statistics */
 }

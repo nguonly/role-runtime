@@ -24,10 +24,10 @@ public class Main {
         try(ATM cbATM = Compartment.initialize(ATM.class)) {
             cbATM.participate(cb, acc2, acc1);
             System.out.println("Both accounts get 1000 Euros seed capital.");
-            //acc1.credit(1000);
-            acc1.invoke("credit", new Class[]{int.class}, new Object[]{1000});
-            //acc2.credit(1000);
-            acc2.invoke("credit", new Class[]{int.class}, new Object[]{1000});
+            acc1.credit(1000);
+            //acc1.invoke("credit", new Class[]{int.class}, new Object[]{1000});
+            acc2.credit(1000);
+            //acc2.invoke("credit", new Class[]{int.class}, new Object[]{1000});
 
             System.out.println("Withdrawing 200 Euro from both accounts:");
             //cbATM.payCash(acc1, 200);

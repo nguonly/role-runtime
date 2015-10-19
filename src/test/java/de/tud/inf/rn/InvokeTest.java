@@ -5,7 +5,10 @@ import de.tud.inf.rn.actor.Player;
 import de.tud.inf.rn.actor.Role;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
+import de.tud.inf.rn.db.orm.Relation;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.DumpHelper;
+import de.tud.inf.rn.registry.RegistryManager;
 import de.tud.inf.rn.role.Student;
 import org.junit.After;
 import org.junit.Assert;
@@ -14,8 +17,8 @@ import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
-import java.util.Date;
-import java.util.Hashtable;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Created by nguonly role 7/17/15.
@@ -25,13 +28,13 @@ public class InvokeTest {
 
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        //DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     public static class TeachingAssistant extends Role {
@@ -115,6 +118,16 @@ public class InvokeTest {
         }
     }
 
+    public static class E extends Role{
+        public String me(){
+            return "E";
+        }
+
+//        public String getName(){
+//            return "E";
+//        }
+    }
+
     public static class CompartmentA extends Compartment{
 
     }
@@ -124,7 +137,9 @@ public class InvokeTest {
         try(CompartmentA comp = Compartment.initialize(CompartmentA.class)) {
             Person p = Person.initialize(Person.class);
 
-            p.bind(comp, A.class).bind(comp, B.class).bind(comp, C.class).bind(comp, D.class);
+            Role a = p.bind(comp, A.class);
+            a.bind(comp, B.class).bind(comp, C.class).bind(comp, D.class);
+            a.bind(E.class);
 
             String retValue = p.invoke("whatName", String.class);
 
@@ -138,7 +153,8 @@ public class InvokeTest {
             Person p = Player.initialize(Person.class);
 
             Role a = p.bind(A.class);
-            a.bind(B.class);
+            Role b = a.bind(B.class);
+            //b.bind(C.class);
             Role d = a.bind(D.class);
             d.bind(C.class);
 
@@ -183,37 +199,6 @@ public class InvokeTest {
 
             Assert.assertEquals("P", retValue);
         }
-    }
-
-    public static class Animal{
-        private Hashtable<Integer, Role> m_roles = new Hashtable<>();
-
-        public <T extends Role> void addRole(Integer i, Class<T> role){
-            try {
-                T r = role.newInstance();
-                m_roles.put(i, r);
-
-            } catch (InstantiationException e) {
-                e.printStackTrace();
-            } catch (IllegalAccessException e) {
-                e.printStackTrace();
-            }
-        }
-
-        public <T extends Role> T getRole(Integer i, Class<T> role){
-            return role.cast(m_roles.get(i));
-        }
-    }
-
-    @Test
-    public void typeSafeRole(){
-        Animal jerry = new Animal();
-
-        jerry.addRole(1, A.class);
-        jerry.addRole(2, B.class);
-
-        Assert.assertEquals("A", jerry.getRole(1, A.class).getName());
-        Assert.assertEquals("B", jerry.getRole(2, B.class).getName());
     }
 
 }

@@ -9,51 +9,65 @@ import de.tud.inf.rn.db.SchemaManager;
  */
 public class Main {
     public static void main(String[] args){
-        SchemaManager.drop();
-        SchemaManager.create();
+//        SchemaManager.drop();
+//        SchemaManager.create();
 
-        Bank bb = new Bank("Bust-Bank");
+//        int n = 1_000_000;
+//        long startTime = System.currentTimeMillis();
+//        for(int i=0; i<n; i++) {
+            Bank bb = new Bank("Bust-Bank");
 
-        Account acc1 = Player.initialize(Account.class);
-        acc1.setBank(bb);
+            Account acc1 = Player.initialize(Account.class);
+            acc1.setBank(bb);
 
-        Bank cb = new Bank("Crash-Bank");
-        Account acc2 = Player.initialize(Account.class);
-        acc2.setBank(cb);
+            Bank cb = new Bank("Crash-Bank");
+            Account acc2 = Player.initialize(Account.class);
+            acc2.setBank(cb);
 
-        try(ATM cbATM = Compartment.initialize(ATM.class)) {
-            cbATM.participate(cb, acc2, acc1);
-            System.out.println("Both accounts get 1000 Euros seed capital.");
-            acc1.invoke("credit", new Class[]{int.class}, new Object[]{1000});
+            try (ATM cbATM = Compartment.initialize(ATM.class)) {
+                cbATM.participate(cb, acc2, acc1);
+                //System.out.println("Both accounts get 1000 Euros seed capital.");
+                //acc1.invoke("credit", new Class[]{int.class}, new Object[]{1000});
+                acc1.credit(1000);
+                //acc2.invoke("credit", new Class[]{int.class}, new Object[]{1000});
+                acc2.credit(1000);
+                //System.out.println("Withdrawing 200 Euro from both accounts:");
 
-            acc2.invoke("credit", new Class[]{int.class}, new Object[]{1000});
+                cbATM.payCash(acc1, 200);
+                //acc1.credit(200);
+                //acc1.invoke("credit", new Class[]{int.class}, new Object[]{200});
 
-            System.out.println("Withdrawing 200 Euro from both accounts:");
-            cbATM.payCash(acc1, 200);
-            System.out.println("Balance of foreign account: " + acc1.getBalance() + " Euro");
+                //System.out.println("Balance of foreign account: " + acc1.getBalance() + " Euro");
 
-            cbATM.payCash(acc2, 200);
-            System.out.println("Balance of home account: " + acc2.getBalance() + " Euro");
+                cbATM.payCash(acc2, 200);
 
-            System.out.println("ATMs fee account balance: " + cbATM.getFeeAccountBalance() + " Euro");
+                System.out.println("Balance of home account: " + acc2.getBalance() + " Euro");
 
-            System.out.println("---------------------------------------------------");
-            try {
-                System.out.println("Get balance of foreign account via atm: ");
-                System.out.println(cbATM.getBalance(acc1) + " Euro");
-            } catch (AccessDeniedException ade) {
-                System.out.println("Sorry: Can not read the balance of a foreign account!");
+                System.out.println("ATMs fee account balance: " + cbATM.getFeeAccountBalance() + " Euro");
+
+                System.out.println("---------------------------------------------------");
+                try {
+                    System.out.println("Get balance of foreign account via atm: ");
+                    System.out.println(cbATM.getBalance(acc1) + " Euro");
+                } catch (AccessDeniedException ade) {
+                    System.out.println("Sorry: Can not read the balance of a foreign account!");
+                }
+                try {
+                    System.out.println("Get balance of home account via atm: ");
+                    System.out.println(cbATM.getBalance(acc2) + " Euro");
+                } catch (AccessDeniedException ade) {
+                    System.out.println("Sorry: Can not read the balance of a foreign account!");
+                }
+                System.out.println("---------------------------------------------------");
+
+
             }
-            try {
-                System.out.println("Get balance of home account via atm: ");
-                System.out.println(cbATM.getBalance(acc2) + " Euro");
-            } catch (AccessDeniedException ade) {
-                System.out.println("Sorry: Can not read the balance of a foreign account!");
-            }
-            System.out.println("---------------------------------------------------");
+//        }
+//        long duration = System.currentTimeMillis() - startTime;
+//        System.out.println("Duration(ms) : " + duration);
+//        System.out.println("Duration (s) : " + duration / 1000);
 
 
-        }
         try(SpecialConditions sc = Compartment.initialize(SpecialConditions.class)) {
             sc.participate(acc2);
 
@@ -67,6 +81,7 @@ public class Main {
             acc2.invoke("credit", new Class[]{int.class}, new Object[]{2000}); // -> balance += 2000
             System.out.println("Special condition participating account gets: " + (acc2.getBalance() - acc2_before) + " Euro.");
         }
+
 
     }
 

@@ -14,7 +14,7 @@ public class ForeignAccount extends Role {
         int fee = calculateFee(amount);
         boolean b = invokeBase("debit", boolean.class, new Class[]{int.class}, new Object[]{fee + amount});
         if(b){
-            System.out.println("Debiting from a foreign account: Additional fee of " + fee + " Euro will be debited!");
+            //System.out.println("Debiting from a foreign account: Additional fee of " + fee + " Euro will be debited!");
             //feeAccount.credit(fee);
             invokeCompartment("credit", new Class[]{int.class},new Object[]{fee});
             return true;

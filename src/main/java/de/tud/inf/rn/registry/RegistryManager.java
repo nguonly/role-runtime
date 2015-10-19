@@ -3,21 +3,18 @@ package de.tud.inf.rn.registry;
 import de.tud.inf.rn.actor.Compartment;
 import de.tud.inf.rn.actor.Player;
 import de.tud.inf.rn.actor.Role;
-import de.tud.inf.rn.db.DBManager;
-import de.tud.inf.rn.db.DataManager;
+import de.tud.inf.rn.db.orm.PlayRelationEnum;
 import de.tud.inf.rn.db.orm.Relation;
-import de.tud.inf.rn.exception.CompartmentAsPlayerInItsContextException;
-import de.tud.inf.rn.exception.CompartmentNotFoundException;
+import de.tud.inf.rn.exception.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.MethodType;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.sql.*;
 import java.util.*;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 /**
  * Created by nguonly role 7/10/15.
@@ -25,281 +22,388 @@ import java.util.*;
 public class RegistryManager {
     private static RegistryManager m_registryManager;
 
-    private static HashMap<Integer, Object> m_objects = new HashMap<>();
-    private static HashMap<Integer, Object> m_roles = new HashMap<>();
-    private static HashMap<Integer, Object> m_compartments = new HashMap<>();
+    private static HashMap<Integer, Object> objectsMap = new HashMap<>();
+    private static HashMap<Integer, Object> rolesMap = new HashMap<>();
+    private static HashMap<Integer, Object> compartmentsMap = new HashMap<>();
 
-    private static Deque<Integer> m_activeCompartments = new ArrayDeque<>();
+    public static Deque<Relation> m_relations = new ArrayDeque<>();
 
-    private static int m_number_level = 2*3;
+    private static ArrayDeque<Integer> m_activeCompartments = new ArrayDeque<>();
 
-    static final Logger log = LogManager.getLogger(RegistryManager.class);
+    private static int m_number_level = 4*4 + 1;
 
-    public static synchronized RegistryManager getInstance(){
-        if(m_registryManager==null){
-            m_registryManager = new RegistryManager();
+    //static final Logger log = LogManager.getLogger(RegistryManager.class);
+
+    private static final ReentrantLock lock = new ReentrantLock();
+
+    public static RegistryManager getInstance(){
+        lock.lock();
+        try {
+            if (m_registryManager == null) {
+                m_registryManager = new RegistryManager();
+            }
+        }finally {
+            lock.unlock();
         }
 
         return m_registryManager;
     }
 
-    public <T> T initializePlayer(Class<T> player){
+    public void setRelations(Deque<Relation> relations){
+        m_relations = relations;
+    }
+
+    public Deque<Relation> getRelations(){
+        return m_relations;
+    }
+
+    public <T> T initializePlayer(Class<T> player, Class[] constructorArgumentTypes, Object[] constructorArgumentValues) {
         try {
-            T p = player.newInstance();
-            m_objects.put(p.hashCode(), p);
+            T p;
+            if(constructorArgumentTypes==null || constructorArgumentValues==null){
+                p = player.newInstance();
+            }else {
+                Constructor<T> constructor = player.getConstructor(constructorArgumentTypes);
+                p = constructor.newInstance(constructorArgumentValues);
+            }
+            //objectsMap.put(p.hashCode(), p);
             return p;
-        } catch (InstantiationException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
+        } catch (InstantiationException | IllegalAccessException | NoSuchMethodException | InvocationTargetException e) {
             e.printStackTrace();
         }
 
         return null;
     }
 
-    public <T> T initializeCompartment(Class<T> compartment){
+    public <T> T initializeCompartment(Class<T> compartment, Class[] constructorArgumentTypes, Object[] constructorArgumentValues){
         try {
-            T p = compartment.newInstance();
-            m_compartments.put(p.hashCode(), p);
+            T p;
+            if(constructorArgumentTypes == null || constructorArgumentValues == null){
+                p = compartment.newInstance();
+            }else{
+                Constructor<T> constructor = compartment.getConstructor(constructorArgumentTypes);
+                p = constructor.newInstance(constructorArgumentValues);
+            }
+
+            compartmentsMap.put(p.hashCode(), p);
 
             //push current active compartment
             m_activeCompartments.push(p.hashCode());
 
             return p;
-        } catch (InstantiationException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
             e.printStackTrace();
         }
 
         return null;
     }
 
-    public Role bind(Compartment compartment, Player player, Class role){
+    public void registerCompartment(Compartment compartment){
+        int compartmentId = compartment.hashCode();
+        if(compartmentsMap.get(compartmentId)==null) compartmentsMap.put(compartmentId, compartment);
+
+        if(!m_activeCompartments.contains(compartmentId)) m_activeCompartments.push(compartmentId);
+    }
+
+    public <T extends Role> T bind(Compartment compartment, Player player,
+                                   Class<T> role,
+                                   Class[] constructorArgumentTypes,
+                                   Object[] constructorArgumentValues) throws RuntimeException{
+
+        Compartment activeCompartment = compartment;
+        if(compartment==null){
+            //check in the compartment stacks
+            if(m_activeCompartments.isEmpty()) throw new CompartmentNotFoundException();
+            activeCompartment = (Compartment) compartmentsMap.get(m_activeCompartments.peek());
+        }
+        int activeCompartmentId = activeCompartment.hashCode();
+
+        //Compartment cannot be a player inside their own compartment
+        if(activeCompartmentId == player.hashCode()) throw new CompartmentAsPlayerInItsContextException();
+
+        //Check whether this role type has been played at the same level
+        Optional<Relation> existingRole = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == activeCompartmentId
+                        && r.getPlayerId() == player.hashCode()
+                        && r.getRoleName().equals(role.getName()))
+                .findFirst();
+        if(existingRole.isPresent()) throw new BindTheSameRoleTypeException();
+
+        //Put player into objectMap
+        if(objectsMap.get(player.hashCode())==null){
+            objectsMap.put(player.hashCode(), player);
+        }
+
+        //TODO: Prohibit constraint
+
         try {
-            Compartment activeCompartment = compartment;
-            if(compartment==null){
-                //check in the compartment stacks
-                if(m_activeCompartments.isEmpty()) throw new CompartmentNotFoundException();
-                activeCompartment = (Compartment)m_compartments.get(m_activeCompartments.peek());
+            T roleInstance;
+            if(constructorArgumentTypes == null || constructorArgumentValues == null){
+                roleInstance = role.newInstance();
+            }else{
+                Constructor<T> constructor = role.getConstructor(constructorArgumentTypes);
+                roleInstance = constructor.newInstance(constructorArgumentValues);
             }
 
-            //Compartment cannot be a player inside their own compartment
-            if(activeCompartment.hashCode() == player.hashCode()) throw new CompartmentAsPlayerInItsContextException();
+            //log.debug("Role Id = " + roleInstance.hashCode() + " : " + roleInstance.getClass().getName());
 
-            Object roleInstance = role.newInstance();
-            log.debug("Role Id = " + roleInstance.hashCode() + " : " + roleInstance.getClass().getName());
-
-            //Register Role's methods
-            Method[] methods = role.getDeclaredMethods();
-            for(Method m: methods){
-                //System.out.println(m.getName());
-                DataManager.insertRoleData(roleInstance.hashCode(), role.getName(), m.toString());
-            }
-
-            m_roles.put(roleInstance.hashCode(), roleInstance);
-
-            //Register object's methods
-            Class clsPlayer = player.getClass();
-            methods = clsPlayer.getDeclaredMethods();
-            for(Method m : methods) {
-                DataManager.insertPlayerData(player.hashCode(), clsPlayer.getName(), m.getName());
-            }
-
+            rolesMap.put(roleInstance.hashCode(), roleInstance);
 
             //find sequence for each level
-            String query="SELECT Sequence from Relation where PlayerId=" + player.hashCode() +
-                    " order by Sequence desc limit 1";
-            Statement st = DBManager.getConnection().createStatement();
-            ResultSet rs = st.executeQuery(query);
-            int seq = 0;
-            if(rs.next()) seq = rs.getInt("Sequence");
+            Optional<Relation> distinct = m_relations.stream()
+                    .filter(c -> c.getCompartmentId() == activeCompartmentId
+                            && c.getPlayerId() == player.hashCode())
+                    .sorted(RelationSortHelper.SEQUENCE_DESC)
+                    .findFirst();
+
+            long seq = 0;
+            if(distinct.isPresent()) seq = distinct.get().getSequence();
 
             //seq++;
-            int c = (int)Math.pow(10, m_number_level);
-            if(seq ==0)
+            long c = (long)Math.pow(10, m_number_level);
+            if(seq ==0) {
                 seq = c;
-            else {
+            }else {
                 seq = ((seq/c) +1)*c;
             }
 
-            //Register play relation
+            //Register Role's methods
             String playerName = player.getClass().getName();
+            Method[] methods = role.getDeclaredMethods();
+
             Relation relation = new Relation();
-            relation.compartmentId= activeCompartment.hashCode();
-            relation.compartmentName= activeCompartment.getClass().getName();
-            relation.objectId=player.hashCode();
-            relation.objectName = playerName;
-            relation.playerId = player.hashCode();
-            relation.playerName = playerName;
-            relation.roleId = roleInstance.hashCode();
-            relation.roleName = role.getName();
-            relation.level = 1;
-            relation.type = 2;
-            relation.sequence = seq;
-            DataManager.insertRelation(relation);
+            relation.setCompartmentId(activeCompartment.hashCode());
+            relation.setCompartmentName(activeCompartment.getClass().getName());
+            relation.setObjectId(player.hashCode());
+            relation.setObjectName(playerName);
+            relation.setPlayerId(player.hashCode());
+            relation.setPlayerName(playerName);
+            relation.setRoleId(roleInstance.hashCode());
+            relation.setRoleName(role.getName());
+            relation.setLevel(1);
+            relation.setType(PlayRelationEnum.OBJECT_PLAYS_ROLE.getCode());
+            relation.setSequence(seq);
 
-            //Update ObjectId for retroactive inheritant role
-            //DataManager.updateObjectRetroactiveInherit(roleInstance.hashCode(), roleInstance.hashCode());
+            //Register Role's methods
+            if(methods.length>0) {
+                for (Method m : methods) {
+                    relation.methodName = m.toString();
 
+                    m_relations.add(new Relation(relation));
+                }
+            }else{
+                relation.setMethodName(""); //if null then, the match (RegEx) won't work on method invocation
+                m_relations.add(new Relation(relation));
+            }
 
-            return (Role)roleInstance;
+            //DumpHelper.dumpRelation(m_relations);
+
+            return roleInstance;
+
         }catch(Exception e) {
-            //System.err.println(e.getClass().getName() + ": " + e.getMessage());
             e.printStackTrace();
         }
 
         return null;
     }
 
-    public void inherit(Compartment compartment, Object core, String superRole){
-        Connection con = DBManager.getConnection();
+    public <T extends Role> T inherit(Compartment compartment, Object core, Class<T> superRole,
+                                      Class[] constructorArgumentTypes,
+                                      Object[] constructorArgumentValues) throws RuntimeException{
+
+        Object activeCompartment = compartment==null?compartmentsMap.get(m_activeCompartments.peek()):
+                    compartment;
+        int compartmentId = activeCompartment.hashCode();
+        int coreId = core.hashCode();
+
+        //Cannot inherit itself
+        if(core.getClass().getName().equals(superRole.getName())) throw new InheritItselfException();
+
+        //Allow only single inheritance
+        //Check for existing role type available
+        Optional<Relation> existingRole = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == compartmentId
+                        && r.getPlayerId() == coreId
+                        && r.getType() == PlayRelationEnum.INHERITANCE.getCode())
+                .findFirst();
+
+        if(existingRole.isPresent()) throw new SingleInheritanceException();
 
         try{
-            Class clsSuperRole = Class.forName(superRole);
-            Object roleInstance = clsSuperRole.newInstance();
+            T roleInstance;
+            if(constructorArgumentTypes == null || constructorArgumentValues == null){
+                roleInstance = superRole.newInstance();
+            }else{
+                Constructor<T> constructor = superRole.getConstructor(constructorArgumentTypes);
+                roleInstance = constructor.newInstance(constructorArgumentValues);
+            }
 
             //put into role list
-            m_roles.put(roleInstance.hashCode(), roleInstance);
+            rolesMap.put(roleInstance.hashCode(), roleInstance);
 
-            String sql = "SELECT ObjectId, ObjectName FROM Relation WHERE RoleId=" + core.hashCode();
-            Statement stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(sql);
-            rs.next();
-            int objId = rs.getInt("ObjectId"); //a real core object
-            String objName = rs.getString("ObjectName"); // a real core object name
+            Optional<Relation> coreRelation = m_relations.stream()
+                    .filter(r -> r.getCompartmentId() == compartmentId
+                                && r.getRoleId() == coreId)
+                    .sorted(RelationSortHelper.SEQUENCE_DESC)
+                    .findFirst();
 
-            System.out.println("Core Id=" + objId);
+            int objId = coreRelation.get().getObjectId(); //a real core object
+            String objName = coreRelation.get().getObjectName(); // a real core object name
+
+//            log.debug("Core Id=" + objId);
+
+            long seq = coreRelation.get().getSequence();
+            int lvl = coreRelation.get().getLevel();
 
             //Register Role's methods
-            Method[] methods = clsSuperRole.getDeclaredMethods();
-            for(Method m: methods){
-                System.out.println(m.getName());
-                DataManager.insertRoleData(roleInstance.hashCode(), clsSuperRole.getName(), m.getName());
-            }
-
-            int seq = 0;
-            int lvl = 0;
-            //check if core has previous bound role
-
-
-            //find sequence for each level
-            String query = "SELECT Level, Sequence from Relation where RoleId=" + core.hashCode() +
-                    " order by Sequence desc limit 1";
-            rs = stmt.executeQuery(query);
-
-            if (rs.next()) {
-                seq = rs.getInt("Sequence");
-                lvl = rs.getInt("Level");
-            }
-
-            //seq = seq * 100 + 1;
-            //lvl++;
-            //c =(int)Math.pow(10, m_number_level-2*(lvl-1));
-            //seq = ((seq/c) + 1)*c;
-
-
-            //Register play relation
             String playerName = core.getClass().getName();
+            Method[] methods = superRole.getDeclaredMethods();
             Relation relation = new Relation();
-            relation.compartmentId= compartment==null? -1 : compartment.hashCode();
-            relation.compartmentName= compartment==null? "" : compartment.getClass().getName();
-            relation.objectId=objId;
-            relation.objectName = objName;
-            relation.playerId = core.hashCode();
-            relation.playerName = playerName;
-            relation.roleId = roleInstance.hashCode();
-            relation.roleName = superRole;
-            relation.level = lvl;
-            relation.type = 1;
-            relation.sequence = seq;
-            DataManager.insertRelation(relation);
+            relation.setCompartmentId(compartmentId);
+            relation.setCompartmentName(activeCompartment.getClass().getName());
+            relation.setObjectId(objId);
+            relation.setObjectName(objName);
+            relation.setPlayerId(core.hashCode());
+            relation.setPlayerName(playerName);
+            relation.setRoleId(roleInstance.hashCode());
+            relation.setRoleName(superRole.getName());
+            relation.setLevel(lvl);
+            relation.setType(PlayRelationEnum.INHERITANCE.getCode());
+            relation.setSequence(seq);
+
+            if(methods.length>0){
+                for(Method m: methods){
+                    relation.setMethodName(m.toString());
+
+                    m_relations.add(new Relation(relation));
+                }
+            }else{
+                relation.setMethodName("");
+                m_relations.add(relation);
+            }
+
+            return roleInstance;
         }catch(Exception e) {
-            System.err.println(e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
         }
+
+        return null;
     }
 
 
-    public Role rolePlaysRole(Compartment compartment, Object core, Class role){
-        Connection con = DBManager.getConnection();
+    public <T extends Role> T rolePlaysRole(Compartment compartment, Object core,
+                                            Class<T> role,
+                                            Class[] constructorArgumentTypes,
+                                            Object[] constructorArgumentValues){
 
-        try{
             Compartment activeCompartment = compartment;
             if(compartment==null){
                 //check in the compartment stacks
                 if(m_activeCompartments.isEmpty()) throw new CompartmentNotFoundException();
-                activeCompartment = (Compartment)m_compartments.get(m_activeCompartments.peek());
+                activeCompartment = (Compartment) compartmentsMap.get(m_activeCompartments.peek());
+            }
+            int activeCompartmentId = activeCompartment.hashCode();
+
+        Optional<Relation> existingRole = m_relations.stream()
+                .filter(x -> x.getCompartmentId() == activeCompartmentId
+                        && x.getPlayerId() == core.hashCode()
+                        && x.getRoleName().equals(role.getName())
+                        && x.getType() != PlayRelationEnum.INHERITANCE.getCode())
+                .sorted(RelationSortHelper.SEQUENCE_DESC)
+                .findFirst();
+
+        if(existingRole.isPresent()) throw new BindTheSameRoleTypeException();
+
+        try{
+            //Initialize role
+            T roleInstance;
+            if(constructorArgumentTypes == null || constructorArgumentValues == null){
+                roleInstance = role.newInstance();
+            }else{
+                Constructor<T> constructor = role.getConstructor(constructorArgumentTypes);
+                roleInstance = constructor.newInstance(constructorArgumentValues);
             }
 
-            Object roleInstance = role.newInstance();
+            rolesMap.put(roleInstance.hashCode(), roleInstance);
 
-            m_roles.put(roleInstance.hashCode(), roleInstance);
+            Optional<Relation> coreObjRelation = m_relations.stream()
+                    .filter(c -> c.getRoleId() == core.hashCode()
+                            && c.getCompartmentId() == activeCompartmentId)
+                    .sorted(RelationSortHelper.SEQUENCE_DESC)
+                    .findFirst();
 
-            String sql = "SELECT ObjectId, ObjectName FROM Relation WHERE RoleId=" + core.hashCode();
-            Statement stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(sql);
-            rs.next();
-            int objId = rs.getInt("ObjectId"); //a real core object
-            String objName = rs.getString("ObjectName"); // a real core object name
-
-            log.debug("Core Id {}", objId);
-
-            //Register Role's methods
-            Method[] methods = role.getDeclaredMethods();
-            for(Method m: methods){
-                log.debug("{}.{}", role.getName(), m.getName());
-                DataManager.insertRoleData(roleInstance.hashCode(), role.getName(), m.toString());
-            }
-
-            int seq = 0;
+            long seq = 0;
             int lvl = 0;
+            long c;
+            int objId=0;
+            String objName = "";
+            if(coreObjRelation.isPresent()){
+                objId = coreObjRelation.get().objectId;
+                objName = coreObjRelation.get().objectName;
+            }
+
+//            log.debug("Core Id {}", objId);
+
             //check if core has previous bound role
-            String query = "SELECT Level, Sequence from Relation where PlayerId=" + core.hashCode() +
-                    " and PlayType!=1 order by Sequence desc limit 1";
-            rs = stmt.executeQuery(query);
-            int c = 0;
-            if(rs.next()){
-                lvl = rs.getInt("Level");
-                seq = rs.getInt("Sequence");
-                c = (int)Math.pow(10, m_number_level - 2*(lvl-1));
+            Optional<Relation> latestRole = m_relations.stream()
+                    .filter(x -> x.getCompartmentId() == activeCompartmentId
+                            && x.getPlayerId() == core.hashCode()
+                            && x.getType() != PlayRelationEnum.INHERITANCE.getCode())
+                    .sorted(RelationSortHelper.SEQUENCE_DESC)
+                    .findFirst();
+
+            if(latestRole.isPresent()){
+                lvl = latestRole.get().getLevel();
+                seq = latestRole.get().getSequence();
+                c = (long)Math.pow(10, m_number_level - 2*(lvl-1));
                 seq = ((seq/c)+1)*c;
             }else {
-
                 //find sequence for each level
-                query = "SELECT Level, Sequence from Relation where RoleId=" + core.hashCode() +
-                        " order by Sequence desc limit 1";
-                rs = stmt.executeQuery(query);
-
-                if (rs.next()) {
-                    seq = rs.getInt("Sequence");
-                    lvl = rs.getInt("Level");
+                if(coreObjRelation.isPresent()){
+                    seq = coreObjRelation.get().getSequence();
+                    lvl = coreObjRelation.get().getLevel();
                 }
 
-                //seq = seq * 100 + 1;
                 lvl++;
-                c =(int)Math.pow(10, m_number_level-2*(lvl-1));
+                c =(long)Math.pow(10, m_number_level-2*(lvl-1));
                 seq = ((seq/c) + 1)*c;
             }
 
             String playerName = core.getClass().getName();
-            Relation relation = new Relation();
-            relation.compartmentId= activeCompartment.hashCode();
-            relation.compartmentName= activeCompartment.getClass().getName();
-            relation.objectId=objId;
-            relation.objectName = objName;
-            relation.playerId = core.hashCode();
-            relation.playerName = playerName;
-            relation.roleId = roleInstance.hashCode();
-            relation.roleName = role.getName();
-            relation.level = lvl;
-            relation.type = 3;
-            relation.sequence = seq;
-            DataManager.insertRelation(relation);
 
-            return (Role)roleInstance;
+            //Register Role's methods
+            Relation relation = new Relation();
+            relation.setCompartmentId(activeCompartment.hashCode());
+            relation.setCompartmentName(activeCompartment.getClass().getName());
+            relation.setObjectId(objId);
+            relation.setObjectName(objName);
+            relation.setPlayerId(core.hashCode());
+            relation.setPlayerName(playerName);
+            relation.setRoleId(roleInstance.hashCode());
+            relation.setRoleName(role.getName());
+            relation.setLevel(lvl);
+            relation.setType(PlayRelationEnum.ROLE_PLAYS_ROLE.getCode());
+            relation.setSequence(seq);
+
+            Method[] methods = role.getDeclaredMethods();
+            if(methods.length>0) {
+                for (Method m : methods) {
+                    //log.debug("{}.{}", role.getName(), m.getName());
+
+                    relation.setMethodName(m.toString());
+
+                    m_relations.add(new Relation(relation));
+                }
+            }else{
+                relation.setMethodName(""); //if null then, the match (RegEx) won't work on method invocation
+                m_relations.add(new Relation(relation));
+            }
+
+            //DumpHelper.dumpRelation(m_relations);
+
+            return roleInstance;
         }catch(Exception e) {
-            log.error("Role {} cannot be bound!", role.getName());
-            log.error("{} : {}", e.getClass().getName(), e.getMessage());
+            e.printStackTrace();
         }
 
         return null;
@@ -308,28 +412,26 @@ public class RegistryManager {
 
     public <T> T playerInvokeRole(Compartment compartment, Object core, String methodName, Class<T> returnType,
                                   Class[] argumentType, Object[] argumentValue) throws RuntimeException{
-        Connection con = DBManager.getConnection();
 
-        int compartmentId = compartment==null?m_activeCompartments.peek():compartment.hashCode();
-        //returnType = returnType==null? (Class<T>) void.class :returnType;
+        int compartmentId = compartment==null?m_activeCompartments.peek() : compartment.hashCode();
         try{
             String methodSignature = methodSignature(returnType, methodName, argumentType);
 
-            String query = "SELECT * FROM vRelation WHERE RoleInterface LIKE(?) AND ObjectId=? AND CompartmentId=? " +
-                    " ORDER BY  Sequence DESC  ,PlayType desc LIMIT 1";
-            PreparedStatement stmt = con.prepareStatement(query);
-            stmt.setString(1, methodSignature);
-            stmt.setInt(2, core.hashCode());
-            stmt.setInt(3, compartmentId);
-            ResultSet rs = stmt.executeQuery();
+            Optional<Relation> rel = m_relations.stream()
+                    .filter(c -> c.getCompartmentId() == compartmentId
+                            && c.getObjectId() == core.hashCode()
+                            && c.getMethodName().matches(methodSignature))
+                    .sorted(RelationSortHelper.SEQUENCE_DESC.thenComparing(RelationSortHelper.TYPE_DESC))
+                    .findFirst();
+
             Object invokingObject;
-            if(rs.next()){
-                int roleId = rs.getInt("RoleId");
-                invokingObject = m_roles.get(roleId);
+            if(rel.isPresent()){
+                int roleId = rel.get().getRoleId();
+                invokingObject = rolesMap.get(roleId);
             }else{
                 //Should check our own methods to be invoked
-                log.debug("Method {} was not found in roles of {}", methodName, core.getClass().getName());
-                log.debug("Now starts looking role the core's methods");
+//                log.debug("Method {} was not found in roles of {}", methodName, core.getClass().getName());
+//                log.debug("Now starts looking role the core's methods");
                 invokingObject = core;
             }
             //MethodHandle methodHandle =  MethodHandles.lookup().findVirtual(invokingObject.getClass(), methodName, MethodType.methodType(returnType, argumentType));
@@ -343,12 +445,7 @@ public class RegistryManager {
                 return returnType.cast(objRet);
             }
 
-        }catch(SQLException e) {
-            //System.err.println(e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace();
-        }  catch (NoSuchMethodException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
+        }  catch (NoSuchMethodException | IllegalAccessException e) {
             e.printStackTrace();
         } catch (InvocationTargetException e) {
             //e.printStackTrace();
@@ -361,31 +458,34 @@ public class RegistryManager {
     }
 
     public <T> T roleInvokeRole(Role core, String methodName, Class<T> returnType, Class[] argumentType, Object[] argumentValue){
-        Connection con = DBManager.getConnection();
-
         try{
             String methodSignature = methodSignature(returnType, methodName, argumentType);
 
-            String query = "";
-            query += "WITH RECURSIVE player_id( i )                            ";
-            query += "AS (                                                     ";
-            query += "     VALUES(?)                                           ";
-            query += "     UNION                                               ";
-            query += "     SELECT RoleId FROM Relation, player_id              ";
-            query += "     WHERE Relation.PlayerId = player_id.i               ";
-            query += ")                                                        ";
-            query += "SELECT * FROM vRelation WHERE RoleInterface LIKE(?)      ";
-            query += "AND PlayerId IN player_id                                ";
-            query += "ORDER BY  Sequence DESC, PlayType DESC LIMIT 1;          ";
+            int compartmentId = m_activeCompartments.peek();
+            int rolePlayerId = core.hashCode();
 
-            PreparedStatement stmt = con.prepareStatement(query);
-            stmt.setInt(1, core.hashCode());
-            stmt.setString(2, methodSignature);
-            ResultSet rs = stmt.executeQuery();
-            if(rs.next()){
-                int roleId = rs.getInt("RoleId");
-                Object role = m_roles.get(roleId);
-                //Class[] argTypes = new Class[] { String.class };
+            Optional<Relation> rr = m_relations.stream()
+                    .filter(c -> c.getCompartmentId() == compartmentId
+                            && (c.getPlayerId() == rolePlayerId)
+                            && c.getMethodName().matches(methodSignature))
+                    .sorted(RelationSortHelper.SEQUENCE_DESC.thenComparing(RelationSortHelper.TYPE_DESC))
+                    .findFirst();
+
+            //Calculate the sequence of current role to cascade down
+            final long c = (long)Math.pow(10, m_number_level - 2*(rr.get().getLevel()-1));
+            final long  seq = (rr.get().getSequence()/c);
+
+            //All role (including itself) relations down from the cascaded sequence
+            Optional<Relation> rel = m_relations.stream()
+                    .filter(x -> x.getCompartmentId() == compartmentId
+                            && ((x.getSequence() / c) == seq || x.getRoleId() == rolePlayerId)
+                            && x.getMethodName().matches(methodSignature))
+                    .sorted(RelationSortHelper.SEQUENCE_DESC.thenComparing(RelationSortHelper.TYPE_DESC))
+                    .findFirst();
+
+            if(rel.isPresent()){
+                int roleId = rel.get().getRoleId();
+                Object role = rolesMap.get(roleId);
                 Method method = role.getClass().getMethod(methodName, argumentType);
                 Object objRet = method.invoke(role, argumentValue);
                 if(returnType!=null && !returnType.isAssignableFrom(void.class) && !returnType.isAssignableFrom(Void.class)) {
@@ -395,10 +495,10 @@ public class RegistryManager {
                     return returnType.cast(objRet);
                 }
             }else{
-                log.error("The {} method was not found", methodName);
+//                log.error("The {} method was not found", methodName);
             }
         }catch(Exception e) {
-            log.error("Database error: {} : {}", e.getClass().getName(), e.getMessage());
+//            log.error("Database error: {} : {}", e.getClass().getName(), e.getMessage());
         }
 
         return null;
@@ -414,21 +514,17 @@ public class RegistryManager {
      * @return Object
      */
     public <T> T invokeBase(Role role, String methodName, Class<T> returnType, Class[] argumentTypes, Object[] argumentValues) {
-        Connection con = DBManager.getConnection();
-        //Check if base is root player (Player) or role player (Role)
-        String query = "SELECT * FROM Relation WHERE RoleId=?";
+        Optional<Relation> rel = m_relations.stream()
+                .filter(c -> c.getRoleId() == role.hashCode()).findFirst();
         try {
-            PreparedStatement stmt = con.prepareStatement(query);
-            stmt.setInt(1, role.hashCode());
-            ResultSet rs = stmt.executeQuery();
-            if(rs.next()){
+            if(rel.isPresent()){
                 Object base;
-                if(rs.getInt("ObjectId") == rs.getInt("PlayerId")){
+                if(rel.get().getObjectId() == rel.get().getPlayerId()){
                     //It's root player (Player)
-                    base = m_objects.get(rs.getInt("ObjectId"));
+                    base = objectsMap.get(rel.get().getObjectId());
                 }else{
                     //It's role player (Role)
-                    base = m_roles.get(rs.getInt("PlayerId"));
+                    base = rolesMap.get(rel.get().getPlayerId());
                 }
                 Method method = base.getClass().getMethod(methodName, argumentTypes);
                 Object objRet = method.invoke(base, argumentValues);
@@ -439,45 +535,72 @@ public class RegistryManager {
                     return returnType.cast(objRet);
                 }
             }else{
-                log.error("{}.{} was not found", role.getClass().getName(), methodName);
+//                log.error("{}.{} was not found", role.getClass().getName(), methodName);
             }
 
-        } catch (SQLException | NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
+        } catch ( NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
             e.printStackTrace();
         }
         return null;
     }
 
-    public <T> T invokeCompartment(Compartment compartment, boolean isPlayer, Object core, String methodName,
-                                   Class<T> returnType, Class[] argumentTypes, Object[] argumentValues){
-        //Connection con = DBManager.getConnection();
+    /**
+     * The method is to invoke root (core object) methods
+     * @param role a role
+     * @param methodName case-sentitive method name
+     * @param returnType
+     * @param argumentTypes
+     * @param argumentValues
+     * @param <T>
+     * @return
+     */
+    public <T> T invokeCore(Role role, String methodName, Class<T> returnType, Class[] argumentTypes, Object[] argumentValues){
         try{
-            if(m_activeCompartments.isEmpty()) throw new CompartmentNotFoundException();
-            int compartmentId = compartment==null?m_activeCompartments.peek():compartment.hashCode();
-            //String comp = compartment==null?"":String.format("CompartmentId=%s AND", compartment.hashCode());
-//            String query = "SELECT * FROM Relation WHERE CompartmentId=?" + (isPlayer?"ObjectId=?":"RoleId=?");
-//            PreparedStatement stmt = con.prepareStatement(query);
-//            stmt.setInt(1, compartmentId);
-//            stmt.setInt(2, core.hashCode());
-//            ResultSet rs = stmt.executeQuery();
-//
-//            if(rs.next()){
-                Object objCompartment = compartment;
-                if(compartment==null){
-                    //objCompartment = m_compartments.get(rs.getInt("CompartmentId"));
-                    objCompartment = m_compartments.get(compartmentId);
-                }
-                Method method = objCompartment.getClass().getMethod(methodName, argumentTypes);
-            Object objRet = method.invoke(objCompartment, argumentValues);
+            int roleId = role.hashCode();
+            Optional<Relation> rootRel = m_relations.stream()
+                    .filter(r -> r.getRoleId() == roleId)
+                    .findFirst();
+            if(rootRel.isPresent()){
+                Object objRoot = objectsMap.get(rootRel.get().getObjectId());
+                Method method = objRoot.getClass().getMethod(methodName, argumentTypes);
+                Object objRet = method.invoke(objRoot, argumentValues);
                 if(returnType!=null && !returnType.isAssignableFrom(void.class) && !returnType.isAssignableFrom(Void.class)) {
                     if(returnType.isPrimitive()){
                         return (T)objRet;
                     }
                     return returnType.cast(objRet);
                 }
-//            }else{
-//                log.debug("No method found");
-//            }
+            }else{
+                throw new RuntimeException("Root or Core Object was not found");
+            }
+        }catch(NoSuchMethodException | InvocationTargetException | IllegalAccessException | CompartmentNotFoundException e){
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    public <T> T invokeCompartment(boolean isPlayer, Object core, String methodName,
+                                   Class<T> returnType, Class[] argumentTypes, Object[] argumentValues){
+        try{
+            int coreId = core.hashCode();
+            Optional<Relation> compartmentRel = m_relations.stream()
+                    .filter(r -> isPlayer ? r.getPlayerId() == coreId : r.getRoleId() == coreId)
+                    .findFirst();
+
+            if(compartmentRel.isPresent()){
+                Object objCompartment = compartmentsMap.get(compartmentRel.get().getCompartmentId());
+                Method method = objCompartment.getClass().getMethod(methodName, argumentTypes);
+                Object objRet = method.invoke(objCompartment, argumentValues);
+                if(returnType!=null && !returnType.isAssignableFrom(void.class) && !returnType.isAssignableFrom(Void.class)) {
+                    if(returnType.isPrimitive()){
+                        return (T)objRet;
+                    }
+                    return returnType.cast(objRet);
+                }
+            }else{
+                throw new CompartmentNotFoundException();
+            }
         }catch(NoSuchMethodException | InvocationTargetException | IllegalAccessException | CompartmentNotFoundException e){
             e.printStackTrace();
         }
@@ -486,18 +609,49 @@ public class RegistryManager {
     }
 
 
-    public void unbind(Object core, Class role){
-        if(log.isDebugEnabled()) {
-            log.debug("Before deleting roles in Hashtable");
-        }
-        //Get role Id
-        int roleId = DataManager.getIdByName(core.hashCode(), "Role", role.getName());
-        DataManager.deleteRoleRecord(m_roles, roleId);
 
-        //test whether roles are removed from m_roles hashtable
-        if(log.isDebugEnabled()) {
-            log.debug("---------- After deleting roles from both Database and hashtable");
+    public void unbind(Object core,  Class role){
+//        if(log.isDebugEnabled()) {
+//            log.debug("Before deleting roles in Hashtable");
+//        }
+        //Get role Id
+
+        //Find concrete role relation
+        int compartmentId = m_activeCompartments.peek();
+        Optional<Relation> concreteRoleRelation = m_relations.stream()
+                .filter(c -> c.getCompartmentId() == compartmentId
+                        //&& isPlayer?(c.playerId == rolePlayerId):(c.roleId == rolePlayerId)
+                        && c.getPlayerId() == core.hashCode()
+                        && c.getRoleName().equals(role.getName()))
+                .sorted(RelationSortHelper.SEQUENCE_DESC.thenComparing(RelationSortHelper.TYPE_DESC))
+                .findFirst();
+
+        //Find role list in play relation by concrete role relation
+        final long c = (long)Math.pow(10, m_number_level - 2*(concreteRoleRelation.get().getLevel()-1));
+        final long  seq = (concreteRoleRelation.get().getSequence()/c);
+
+        Map<Integer, List<Relation>> uniqueRoleListToBeRemoved = m_relations.stream()
+                .filter(x -> x.getCompartmentId() == compartmentId
+                        && ((x.getSequence() / c) == seq))
+                .sorted(RelationSortHelper.SEQUENCE_DESC.thenComparing(RelationSortHelper.TYPE_DESC))
+                .collect(Collectors.groupingBy(v -> v.getRoleId()));
+
+        //Actual removing process in m_relation
+        for(Iterator<Relation> itr = m_relations.iterator(); itr.hasNext();){
+            Relation r = itr.next();
+            for (Integer roleId : uniqueRoleListToBeRemoved.keySet()) {
+                if (r.getRoleId() == roleId) {
+                    itr.remove();
+                    //itrRoleToBeRemoved.remove(); //To prevent from overloading method not removing
+                    break;
+                }
+            }
         }
+
+        //test whether roles are removed from rolesMap hashtable
+//        if(log.isDebugEnabled()) {
+//            log.debug("---------- After deleting roles from both Database and hashtable");
+//        }
     }
 
     /**
@@ -505,94 +659,60 @@ public class RegistryManager {
      * @param root a root player
      */
     public void unbindAll(Object root){
-        Connection con = DBManager.getConnection();
         int rootId = root.hashCode();
-        try{
-            /**
-             * Role Id = -1 is prohibit relation that require no initialization of role
-             */
-            String query = "SELECT * FROM Relation WHERE ObjectId=" + rootId + " AND RoleId!=-1";
-            Statement stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
-            while(rs.next()){
-                m_roles.remove(rs.getInt("RoleId"));
-            }
 
-            String sql = "DELETE FROM Relation WHERE ObjectId=" + rootId;
-            PreparedStatement preparedStmt = con.prepareStatement(sql);
-            preparedStmt.executeUpdate();
+        /**
+         * Role Id = -1 is prohibit relation that require no initialization of role
+         */
+        m_relations.stream()
+                .filter(c -> c.getObjectId() == rootId)
+                .forEach(relation -> rolesMap.remove(relation.getRoleId()));
 
-        }catch(Exception e){
-            System.err.println(e.getClass().getName() + ": " + e.getMessage());
-        }
+        m_relations.removeIf(relation -> relation.getObjectId() == rootId);
     }
 
     //Role Constraints
 
     /**
-     * This is the prohibit constraint placing role roles. However, it can also be applied to root object as well.
+     * This prohibit constraint is applied for Role.
+     * It seems not need at this moment.
      * @param core a Player either (root object or role)
      * @param role a prohibited role
      */
 
     public void prohibit(Compartment compartment, Object core, Class role){
-        Connection con = DBManager.getConnection();
         int coreId = core.hashCode();
-        try {
-            String sql = "SELECT ObjectId, ObjectName FROM Relation WHERE PlayerId=" + coreId;
-            Statement stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(sql);
-            rs.next();
-            int objId = rs.getInt("ObjectId"); //a real core object
-            String objName = rs.getString("ObjectName"); // a real core object name
+        int compartmentId = compartment==null?m_activeCompartments.peek():compartment.hashCode();
 
-            int seq = 0;
-            int lvl = 0;
-            //check if core has previous bound role
-            String query = "SELECT Level, Sequence from Relation where PlayerId=" + coreId +
-                    " and PlayType!=1 order by Sequence desc limit 1";
-            rs = stmt.executeQuery(query);
-            int c = 0;
-            if(rs.next()){
-                lvl = rs.getInt("Level");
-                seq = rs.getInt("Sequence");
-                c = (int)Math.pow(10, m_number_level - 2*(lvl-1));
-                seq = ((seq/c)+1)*c;
-            }else {
+        Optional<Relation> coreObject = m_relations.stream()
+                .filter(x -> x.getCompartmentId() == compartmentId
+                        && x.getRoleId() == coreId)
+                .sorted(RelationSortHelper.SEQUENCE_DESC)
+                .findFirst();
 
-                //find sequence for each level
-                query = "SELECT Level, Sequence from Relation where RoleId=" + core.hashCode() +
-                        " order by Sequence desc limit 1";
-                rs = stmt.executeQuery(query);
+        int objId = coreObject.get().getObjectId();
+        String objName = coreObject.get().getObjectName();
+        long seq = coreObject.get().getSequence();
+        int lvl = coreObject.get().getLevel();
 
-                if (rs.next()) {
-                    seq = rs.getInt("Sequence");
-                    lvl = rs.getInt("Level");
-                }
+        String playerName = core.getClass().getName();
+        Relation relation = new Relation();
+        relation.setCompartmentId(compartmentId);
+        relation.setCompartmentName(compartment==null?
+                                        compartmentsMap.get(m_activeCompartments.peek()).getClass().getName()
+                                        : compartment.getClass().getName());
+        relation.setObjectId(objId);
+        relation.setObjectName(objName);
+        relation.setPlayerId(core.hashCode());
+        relation.setPlayerName(playerName);
+        relation.setRoleId(-1); //no role instance
+        relation.setRoleName(role.getName());
+        relation.setLevel(lvl);
+        relation.setType(PlayRelationEnum.PROHIBIT.getCode());
+        relation.setSequence(seq);
+        relation.setMethodName(""); //no required methods to be stored
 
-                //seq = seq * 100 + 1;
-                lvl++;
-                c =(int)Math.pow(10, m_number_level-2*(lvl-1));
-                seq = ((seq/c) + 1)*c;
-            }
-
-            String playerName = core.getClass().getName();
-            Relation relation = new Relation();
-            relation.compartmentId= compartment==null? -1 : compartment.hashCode();
-            relation.compartmentName= compartment==null? "" : compartment.getClass().getName();
-            relation.objectId=objId;
-            relation.objectName = objName;
-            relation.playerId = core.hashCode();
-            relation.playerName = playerName;
-            relation.roleId = -1; //no role instance
-            relation.roleName = role.getName();
-            relation.level = lvl;
-            relation.type = 4;
-            relation.sequence = seq;
-            DataManager.insertRelation(relation);
-        }catch(Exception e){
-            System.err.println(e.getClass().getName() + ": " + e.getMessage());
-        }
+        m_relations.add(relation);
     }
 
     /**
@@ -603,118 +723,146 @@ public class RegistryManager {
      * @param toCompartment
      */
 
-    public void transfer(Class role, Object from, Object to, Compartment toCompartment){
+    public void transfer(Class role, Object from, Compartment fromCompartment, Object to, Compartment toCompartment){
         int fromObjId = from.hashCode();
         int toObjId = to.hashCode();
-        int compartmentId = toCompartment==null? -1: toCompartment.hashCode();
-        int roleId = -1;
-        String roleName = "";
-        int fromCompartmentId = -1;
+        final int toCompartmentId = toCompartment==null? m_activeCompartments.peek(): toCompartment.hashCode();
+        final int fromCompartmentId = fromCompartment==null? m_activeCompartments.peek(): fromCompartment.hashCode();
 
-        Relation relation = new Relation();
+        //find transferring role to do cascading later
+        Optional<Relation> transferringRoleRel = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == fromCompartmentId
+                    && r.getPlayerId() == fromObjId
+                    && r.getRoleName().equals(role.getName()))
+                .findFirst();
 
-        Connection con = DBManager.getConnection();
-        String query;
-        Statement stmt;
+        //Check if the [To] player has current bound roles. If so, get the latest
+        Optional<Relation> latestRoleTo = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == toCompartmentId
+                        && r.getPlayerId() == toObjId)
+                .sorted(RelationSortHelper.SEQUENCE_DESC.thenComparing(RelationSortHelper.TYPE_DESC))
+                .findFirst();
 
-        //Get role
-        try{
-            query = "SELECT * FROM Relation WHERE PlayerId=" + fromObjId +
-                    " AND RoleName='" + role.getCanonicalName() + "'";
-            stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
-            if(rs.next()){
-                roleId=rs.getInt("RoleId");
-                roleName = rs.getString("RoleName");
-                fromCompartmentId = rs.getInt("CompartmentId");
-            }else{
-                log.warn("::: How possible? :::");
+        //Get current relation of To player if available
+        Optional<Relation> currentTo = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == toCompartmentId)
+                .filter(r -> (to instanceof Role) ?
+                        r.getRoleId() == toObjId :
+                        r.getPlayerId() == toObjId)
+                .findFirst();
+
+        //Compute sequence to search the lower cascading
+        final long c = (long)Math.pow(10, m_number_level - 2*(transferringRoleRel.get().getLevel()));
+        final long  seq = (transferringRoleRel.get().getSequence()/c);
+
+        //Get all the roles in the play-relation
+        List<Relation> uniqueRoleList = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == fromCompartmentId
+                        && r.getObjectId() == fromObjId
+                        && (r.getSequence() / c) >= seq)
+                .collect(Collectors.toList());
+                //.collect(Collectors.groupingBy(r -> r.roleId));
+
+        //Remove role and its children from previous bound player
+        for(Iterator<Relation> itr = m_relations.iterator();itr.hasNext();){
+            Relation r = itr.next();
+            for (Relation removingRoleId : uniqueRoleList) {
+                if (r.getRoleId() == removingRoleId.getRoleId()) {
+                    itr.remove();
+                    break;
+                }
             }
-
-        }catch(Exception e){
-            e.printStackTrace();
         }
 
-        query = "SELECT * FROM Relation WHERE PlayerId=" + toObjId +
-                (toCompartment==null?"" : " AND CompartmentId=" + compartmentId) +
-                " ORDER BY Sequence DESC";
-        try {
-            stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
-            if(rs.next()) {
-                relation.compartmentId = rs.getInt("CompartmentId");
-                relation.compartmentName = rs.getString("CompartmentName");
-                relation.objectId = rs.getInt("ObjectId");
-                relation.objectName = rs.getString("ObjectName");
-                relation.playerId = rs.getInt("PlayerId");
-                relation.playerName = rs.getString("PlayerName");
-                relation.roleId = roleId;
-                relation.roleName = roleName;
-                relation.level = 1;
-                relation.type = 2;
+        //loop in uniqueRoleList and construct relation to be added
+        long seq1;
+        int lvl;
+        long c1;
+        if(latestRoleTo.isPresent()){
+            lvl = latestRoleTo.get().getLevel();
+            seq1 = latestRoleTo.get().getSequence();
+            c1 = (long)Math.pow(10, m_number_level - 2*(lvl-1));
+            seq1 = ((seq1 / c1) + 1) * c1;
+        }else{
+            //No previous bound role
+            //find the current object whether it's a role or a core object.
+            //If it's a role then find the level by lvl = role.level + 1
+            if(to instanceof Role){
+                //currentTo is not always empty because it's a role
+                lvl = currentTo.get().getLevel() + 1;
+                c1 = (long) Math.pow(10, m_number_level - 2 * (lvl - 1));
+                seq1 = (currentTo.get().getSequence()/c1 + 1)*c1;
+            }else {
+                lvl = 1;
+                seq1 = (long) Math.pow(10, m_number_level);
+            }
+        }
 
-                int seq = rs.getInt("Sequence");
-                //seq++;
-                int c = (int) Math.pow(10, m_number_level);
-                if (seq == 0)
-                    seq = c;
-                else {
-                    seq = ((seq / c) + 1) * c;
-                }
-                relation.sequence = seq;
-            }else{
-                //no previous role relation
-                relation.compartmentId = toCompartment==null? -1 : compartmentId;
-                relation.compartmentName = toCompartment==null? "" : toCompartment.getClass().getName();
-                relation.objectId = toObjId;
-                relation.objectName = to.getClass().getName();
-                relation.playerId = toObjId;
-                relation.playerName = to.getClass().getName();
-                relation.roleId = roleId;
-                relation.roleName = roleName;
-                relation.level = 1;
-                relation.type = 2;
-                relation.sequence = (int) Math.pow(10, m_number_level);
+        //find the difference between old and new
+        int levelOffset = transferringRoleRel.get().getLevel() - lvl;
+
+        //Check if the target player has previous role type the same as one of uniqueRoleList
+
+        for (Relation r : uniqueRoleList) {
+            Relation relation = new Relation();
+            relation.setCompartmentId(toCompartmentId);
+            relation.setCompartmentName(toCompartment == null ?
+                    compartmentsMap.get(toCompartmentId).getClass().getName() :
+                    toCompartment.getClass().getName());
+            relation.setObjectId((to instanceof Role)
+                    ? currentTo.get().getObjectId() : toObjId);
+            relation.setObjectName((to instanceof Role) ? currentTo.get().getObjectName() :
+                    to.getClass().getName());
+
+            if (r.getRoleId() == transferringRoleRel.get().getRoleId()) {
+                //This the transferring root role
+                relation.setPlayerId((to instanceof Role) ? currentTo.get().getObjectId()
+                        : toObjId);
+                relation.setPlayerName((to instanceof Role) ? currentTo.get().getObjectName()
+                        : to.getClass().getName());
+                relation.setLevel(lvl);
+                relation.setType((to instanceof Role) ?
+                        PlayRelationEnum.ROLE_PLAYS_ROLE.getCode() :
+                        PlayRelationEnum.OBJECT_PLAYS_ROLE.getCode());
+                relation.setSequence(seq1);
+            } else {
+                relation.setPlayerId(r.getPlayerId());
+                relation.setPlayerName(r.getPlayerName());
+                relation.setType(r.getType()); //remain the same
+
+                int newLevel = r.getLevel() - levelOffset;
+                long remainderOfSequence = r.getSequence() % (long) Math.pow(10, m_number_level - 2 * (transferringRoleRel.get().getLevel() - 1));
+                long newSeq = seq1 + remainderOfSequence * (long) Math.pow(10, 2 * (levelOffset));
+                relation.setLevel(newLevel);
+                relation.setSequence(newSeq);
             }
 
-            //Persist relation to database
-            DataManager.insertRelation(relation);
+            relation.setRoleId(r.getRoleId());
+            relation.setRoleName(r.getRoleName()); //rolesMap.get(r.roleId).getClass().getName();
 
-            //Delete role instance from previous player
-            String sql = "DELETE FROM Relation Where CompartmentId=" + fromCompartmentId +
-                    " AND PlayerId=" + fromObjId + " AND RoleId=" + roleId;
-            //System.out.println(sql);
-            PreparedStatement preparedStatement = con.prepareStatement(sql);
-            preparedStatement.executeUpdate();
-        } catch (SQLException e) {
-            e.printStackTrace();
+            relation.setMethodName(r.getMethodName());
+
+            m_relations.add(new Relation(relation));
         }
     }
 
     public void destroyActiveCompartment(Compartment compartment){
-        Connection con = DBManager.getConnection();
-        String sql = "DELETE FROM Relation WHERE CompartmentId=?";
-        try {
-            PreparedStatement stmt = con.prepareStatement(sql);
-            stmt.setInt(1, compartment.hashCode());
-            stmt.execute();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        int compartmentId = compartment.hashCode();
+        m_relations.removeIf(r -> r.getCompartmentId() == compartmentId);
 
         //Pop out from active compartment stack
         if(!m_activeCompartments.isEmpty()){
             m_activeCompartments.pop();
         }else{
-            log.debug("Active Compartment is Empty");
+//            log.debug("Active Compartment is Empty");
         }
-        m_compartments.remove(compartment.hashCode());
+        compartmentsMap.remove(compartmentId);
     }
 
     private String methodSignature(Class returnType, String methodName, Class[] clazzes){
         StringBuilder sb = new StringBuilder();
-        sb.append("%").append(returnType==null?"":" " + returnType.getName());
-        sb.append(" %.").append(methodName).append("(");
+        sb.append(".*").append(returnType==null?"":" " + returnType.getName());
+        sb.append(" .*.").append(methodName).append("\\(");
 
         if(clazzes!=null) {
             for (int i = 0; i < clazzes.length; i++) {
@@ -722,65 +870,60 @@ public class RegistryManager {
                 if (i < clazzes.length - 1) sb.append(",");
             }
         }
-        sb.append(")");
+        sb.append("\\)");
 
         return sb.toString();
     }
 
-    public <T> T role(Compartment compartment, Class<T> roleClass){
-        Connection con = DBManager.getConnection();
-        int compartmentId = compartment==null?m_activeCompartments.peek():compartment.hashCode();
-        String query = "SELECT * FROM Relation WHERE CompartmentId=? AND RoleName=?";
-        try {
-            PreparedStatement pstmt = con.prepareStatement(query);
-            pstmt.setInt(1, compartmentId);
-            pstmt.setString(2, roleClass.getName());
-            ResultSet rs = pstmt.executeQuery();
-            if(rs.next()){
-                Object obj = m_roles.get(rs.getInt("RoleId"));
-                return roleClass.cast(obj);
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
+    public <T> T role(Compartment compartment, Object player, Class<T> roleClass){
+        int compartmentId = compartment == null ? m_activeCompartments.peek() : compartment.hashCode();
+
+        int playerId = player.hashCode();
+        String roleName = roleClass.getName();
+
+        /**
+         * Double filter work in this case. I don't know why.
+         * One filter with complex condition the r.roleName.euqals(..) is not evaluated. Sic!!
+         */
+        //TODO: Check the itnery condition
+        Optional<Relation> roleRel = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == compartmentId)
+                .filter(r -> (player instanceof Role) ?
+                        r.getPlayerId() == playerId :
+                        r.getObjectId() == playerId)
+                .filter(r -> r.getRoleName().equals(roleName))
+                .findFirst();
+
+        if (roleRel.isPresent()) {
+            Object obj = rolesMap.get(roleRel.get().getRoleId());
+            return roleClass.cast(obj);
         }
+
         return null;
     }
 
     public <T> T base(Compartment compartment, Role role, Class<T> baseClass){
-        Connection con = DBManager.getConnection();
-        int compartmentId = compartment==null?m_activeCompartments.peek():compartment.hashCode();
+        int compartmentId = compartment == null ? m_activeCompartments.peek() : compartment.hashCode();
         //Check if base is root player (Player) or role player (Role)
-        String query = "SELECT * FROM Relation WHERE CompartmentId=? AND RoleId=?";
-        try {
-            PreparedStatement stmt = con.prepareStatement(query);
-            stmt.setInt(1, compartmentId);
-            stmt.setInt(2, role.hashCode());
-            ResultSet rs = stmt.executeQuery();
-            if(rs.next()){
-                Object base;
-                if(rs.getInt("ObjectId") == rs.getInt("PlayerId")){
-                    //It's root player (Player)
-                    base = m_objects.get(rs.getInt("ObjectId"));
-                }else{
-                    //It's role player (Role)
-                    base = m_roles.get(rs.getInt("PlayerId"));
-                }
-                return baseClass.cast(base);
-//                Method method = base.getClass().getMethod(methodName, argumentTypes);
-//                Object objRet = method.invoke(base, argumentValues);
-//                if(returnType!=null && !returnType.isAssignableFrom(void.class) && !returnType.isAssignableFrom(Void.class)) {
-//                    if(returnType.isPrimitive()){
-//                        return (T)objRet;
-//                    }
-//                    return returnType.cast(objRet);
-//                }
-            }else{
-                log.error("{} was not found", role.getClass().getName());
-            }
+        Optional<Relation> baseRelation = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == compartmentId
+                        && r.getRoleId() == role.hashCode())
+                .findFirst();
 
-        } catch (SQLException e) {
-            e.printStackTrace();
+        if (baseRelation.isPresent()) {
+            Object base;
+            if (baseRelation.get().getObjectId() == baseRelation.get().getPlayerId()) {
+                //It's root player (Player)
+                base = objectsMap.get(baseRelation.get().getObjectId());
+            } else {
+                //It's role player (Role)
+                base = rolesMap.get(baseRelation.get().getPlayerId());
+            }
+            return baseClass.cast(base);
+        } else {
+//            log.error("{} was not found", role.getClass().getName());
         }
+
         return null;
     }
 
@@ -789,12 +932,90 @@ public class RegistryManager {
             Object objCompartment = compartment;
             if(compartment==null){
                 if(m_activeCompartments.isEmpty()) throw new CompartmentNotFoundException();
-                int compartmentId = compartment==null?m_activeCompartments.peek():compartment.hashCode();
-                objCompartment = m_compartments.get(compartmentId);
+                int compartmentId = m_activeCompartments.peek();
+                objCompartment = compartmentsMap.get(compartmentId);
             }
             return compartmentClass.cast(objCompartment);
         }catch(CompartmentNotFoundException e){
             e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    public Object getRootPlayer(Compartment compartment, Role role){
+        if(m_activeCompartments.isEmpty()) throw new CompartmentNotFoundException();
+        //System.out.println(role.hashCode());
+        int compartmentId = compartment == null ? m_activeCompartments.peek() : compartment.hashCode();
+        //Check if base is root player (Player) or role player (Role)
+        Optional<Relation> baseRelation = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == compartmentId
+                        && r.getRoleId() == role.hashCode())
+                .findFirst();
+        if(baseRelation.isPresent()){
+            int objId = baseRelation.get().getObjectId();
+            return objectsMap.get(objId);
+        }
+
+        return null;
+    }
+
+    public Object[] getRootPlayer(Compartment compartment, Class roleClass){
+        if(m_activeCompartments.isEmpty()) throw new CompartmentNotFoundException();
+
+        int compartmentId = compartment == null ? m_activeCompartments.peek() : compartment.hashCode();
+        //Check if base is root player (Player) or role player (Role)
+
+        ArrayDeque<Object> lstObjects = new ArrayDeque<>();
+
+        m_relations.stream()
+                .filter(r -> r.getCompartmentId() == compartmentId
+                        && r.getRoleName().equals(roleClass.getName()))
+                .forEach(c->{
+                    Object p = objectsMap.get(c.getObjectId());
+                    if(!lstObjects.contains(p)) lstObjects.add(p);
+                });
+
+        return lstObjects.toArray();
+    }
+
+    public Object getPlayer(Compartment compartment, Role role){
+        int compartmentId = compartment == null ? m_activeCompartments.peek() : compartment.hashCode();
+        //Check if base is root player (Player) or role player (Role)
+        Optional<Relation> baseRelation = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == compartmentId
+                        && r.getRoleId() == role.hashCode())
+                .findFirst();
+
+        if (baseRelation.isPresent()) {
+            Object base;
+            if (baseRelation.get().getObjectId() == baseRelation.get().getPlayerId()) {
+                //It's root player (Player)
+                base = objectsMap.get(baseRelation.get().getObjectId());
+            } else {
+                //It's role player (Role)
+                base = rolesMap.get(baseRelation.get().getPlayerId());
+            }
+            return base;
+        } else {
+//            log.error("{} was not found", role.getClass().getName());
+        }
+
+        return null;
+    }
+
+    public Object getCompartment(Object obj){
+        int compartmentId = m_activeCompartments.peek();
+        int objId = obj.hashCode();
+        Optional<Relation> compartmentRel = m_relations.stream()
+                .filter(r -> r.getCompartmentId() == compartmentId)
+                .filter(r -> (obj instanceof Role)?
+                                r.getRoleId() == objId:
+                                r.getPlayerId() == objId)
+                .findFirst();
+
+        if(compartmentRel.isPresent()){
+            return compartmentsMap.get(compartmentRel.get().getCompartmentId());
         }
 
         return null;

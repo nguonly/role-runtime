@@ -51,7 +51,7 @@ public class DataManager {
             stmt.setInt(4, relation.roleId);
             stmt.setInt(5, relation.level);
             stmt.setInt(6, relation.type);
-            stmt.setInt(7, relation.sequence);
+            stmt.setLong(7, relation.sequence);
             stmt.setString(8, relation.compartmentName);
             stmt.setString(9, relation.objectName);
             stmt.setString(10, relation.playerName);

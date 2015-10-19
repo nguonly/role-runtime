@@ -3,20 +3,21 @@ package de.tud.inf.rn;
 import de.tud.inf.rn.actor.Compartment;
 import de.tud.inf.rn.actor.Player;
 import de.tud.inf.rn.actor.Role;
-import de.tud.inf.rn.db.DBManager;
-import de.tud.inf.rn.db.SchemaManager;
+import de.tud.inf.rn.db.orm.Relation;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.DumpHelper;
+import de.tud.inf.rn.registry.RegistryManager;
+import de.tud.inf.rn.registry.StatisticsHelper;
 import de.tud.inf.rn.role.Employee;
 import de.tud.inf.rn.role.Student;
 import de.tud.inf.rn.role.SysAdmin;
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.util.ArrayDeque;
+import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -27,13 +28,12 @@ import static org.junit.Assert.assertTrue;
 public class RoleTransferTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     @Test
@@ -47,46 +47,24 @@ public class RoleTransferTest {
 
             bob.bind(Employee.class);
 
-            Connection con = DBManager.getConnection();
-            String query = "SELECT * FROM Relation Where ObjectId=" + alice.hashCode() +
-                    " AND RoleName LIKE('%SysAdmin')";
-
-            //Assert that SysAdmin role has been bound to Alice
-            try {
-                Statement stmt = con.createStatement();
-                ResultSet rs = stmt.executeQuery(query);
-                rs.next();
-                assertEquals(rs.getInt("RoleId"), sysAdmin.hashCode());
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
+            RegistryManager registryManager = RegistryManager.getInstance();
+            Optional<Relation> sysAdminRel = registryManager.m_relations.stream()
+                    .filter(r -> r.objectId == alice.hashCode() && r.roleName.equals(sysAdmin.getClass().getName()))
+                    .findFirst();
+            assertEquals(sysAdminRel.get().roleId, sysAdmin.hashCode());
 
             //Transfer role
             alice.transfer(SysAdmin.class, bob);
 
-            query = "SELECT * FROM Relation Where ObjectId=" + bob.hashCode() +
-                    " AND RoleName LIKE('%SysAdmin')";
+            sysAdminRel = registryManager.m_relations.stream()
+                    .filter(r -> r.objectId == bob.hashCode() && r.roleName.equals(sysAdmin.getClass().getName()))
+                    .findFirst();
+            assertEquals(sysAdminRel.get().roleId, sysAdmin.hashCode());
 
-            //Assert that role instance has been transferred to bob
-            try {
-                Statement stmt = con.createStatement();
-                ResultSet rs = stmt.executeQuery(query);
-                rs.next();
-                assertEquals(sysAdmin.hashCode(), rs.getInt("RoleId"));
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
-
-            //Assert that SysAdmin role has been deleted from alice
-            query = "SELECT * FROM Relation Where ObjectId=" + alice.hashCode() +
-                    " AND RoleName LIKE('%SysAdmin')";
-            try {
-                Statement stmt = con.createStatement();
-                ResultSet rs = stmt.executeQuery(query);
-                assertEquals(false, rs.next());
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
+            sysAdminRel = registryManager.m_relations.stream()
+                    .filter(r -> r.objectId == alice.hashCode() && r.roleName.equals(sysAdmin.getClass().getName()))
+                    .findFirst();
+            assertTrue(!sysAdminRel.isPresent());
         }
     }
 
@@ -107,7 +85,7 @@ public class RoleTransferTest {
         }
 
         public void transfer(){
-            alice.transfer(SysAdmin.class, bob);
+            alice.transfer(SysAdmin.class, this, bob, this);
         }
     }
 
@@ -118,17 +96,16 @@ public class RoleTransferTest {
 
         company.transfer();
 
+        RegistryManager registryManager = RegistryManager.getInstance();
+
+        Optional<Relation> sysAdminRel = registryManager.getRelations().stream()
+                .filter(r -> r.playerId == company.bob.hashCode()
+                        && r.roleName.matches(".*SysAdmin"))
+                .findFirst();
+        assertTrue(sysAdminRel.isPresent());
+
         //Assert that SysAdmin role instance has been transferred
-        Connection con = DBManager.getConnection();
-        String query = "SELECT * FROM Relation WHERE PlayerId=" + company.bob.hashCode() +
-                " AND RoleName LIKE('%SysAdmin')";
-        try {
-            Statement stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
-            assertTrue(rs.next());
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+
     }
 
 
@@ -142,37 +119,123 @@ public class RoleTransferTest {
 
     class Faculty extends Compartment{
 
-        public void activate(){
+        public void configureBinding(){
             m_alice.bind(this, Employee.class);
             m_alice.bind(this, Student.class);
         }
     }
 
-    class Mensa extends Compartment{
-        public void activate(){
-            m_alice.transfer(Student.class, m_alice, this);
-        }
+    public static class Mensa extends Compartment{
+
     }
 
     @Test
-    public void transferRoleInDifferentCompartments(){
+    public void transferRoleInDifferentCompartments() {
         Faculty faculty = new Faculty();
-        faculty.activate();
+        faculty.configureBinding();
 
-        Mensa alteMensa = new Mensa();
-        alteMensa.activate();
+        try (Mensa alteMensa = Compartment.initialize(Mensa.class)) {
+            m_alice.transfer(Student.class, faculty, m_alice, alteMensa);
 
-        //Assert that alice has Student role instance in Mensa compartment
-        Connection con = DBManager.getConnection();
-        String query = "SELECT * FROM Relation WHERE PlayerId=" + m_alice.hashCode() +
-                " AND CompartmentId=" + alteMensa.hashCode() +
-                " AND RoleName LIKE('%Student')";
-        try {
-            Statement stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
-            assertTrue(rs.next());
-        } catch (SQLException e) {
-            e.printStackTrace();
+            RegistryManager registryManager = RegistryManager.getInstance();
+            Optional<Relation> studentRel = registryManager.m_relations.stream()
+                    .filter(r -> r.playerId == m_alice.hashCode() && r.compartmentId == alteMensa.hashCode()
+                            && r.roleName.matches(".*Student"))
+                    .findFirst();
+
+            assertTrue(studentRel.isPresent());
+        }
+
+    }
+
+    public static class A extends Role{
+        public String whatName(){
+            //invoke method role other roles being in the play line
+            return invoke("getName", String.class);
+        }
+
+        public String getName(){
+            return "A";
+        }
+
+        public String callBase(){
+            return invokeBase("getName", String.class);
+        }
+    }
+
+    public static class B extends Role{
+        public String getName(){
+            return "B";
+        }
+
+        //Invoke Base for roleInvokeBaseWhichIsRole
+        public String callBase(){
+            return invokeBase("getName", String.class);
+        }
+    }
+
+    public static class C extends Role{
+        public String getName(){
+            return "C";
+        }
+    }
+
+    public static class D extends Role{
+        public String getName(){
+            return "D";
+        }
+    }
+
+    public static class E extends Role{
+        public String me(){
+            return "E";
+        }
+
+//        public String getName(){
+//            return "E";
+//        }
+    }
+
+    public static class F extends Role{
+        public String getName() { return "F";}
+    }
+
+    @Test
+    public void checkSequenceAndLevelAfterTransferring(){
+        try(Compartment comp = Compartment.initialize(Compartment.class)){
+            /*
+            alice--->A---->B----->E
+                      \--->D----->C
+             */
+            Person alice = Player.initialize(Person.class);
+
+            Role a = alice.bind(A.class);
+            a.bind(B.class).bind(E.class);
+            Role d = a.bind(D.class);
+            d.bind(C.class);
+
+            RegistryManager registryManager = RegistryManager.getInstance();
+            //DumpHelper.dumpRelation(registryManager.getRelations());
+
+            Person bob = Player.initialize(Person.class);
+            bob.bind(F.class);
+            //bob.bind(A.class).bind(B.class).bind(C.class);
+            alice.transfer(A.class, bob);
+
+//            System.out.println("After transfer");
+//            DumpHelper.dumpRelation(registryManager.getRelations());
+
+            //DumpHelper.printTree(registryManager.getRelations(), comp);
+
+            //Assert that no role on previous player alice
+            Assert.assertEquals(0, StatisticsHelper.rolesCount(alice.hashCode()));
+
+            //Assert that there 6 roles (including F.class) on bob
+            Assert.assertEquals(6, StatisticsHelper.rolesCount(bob.hashCode()));
+
+            //Assert A.class has 4 roles under its relation
+            Assert.assertEquals(4, StatisticsHelper.rolesCount(a.hashCode()));
+
         }
     }
 }

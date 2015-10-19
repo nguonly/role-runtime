@@ -4,7 +4,10 @@ import de.tud.inf.rn.actor.Compartment;
 import de.tud.inf.rn.actor.Player;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
+import de.tud.inf.rn.db.orm.Relation;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.DumpHelper;
+import de.tud.inf.rn.registry.RegistryManager;
 import de.tud.inf.rn.role.*;
 import org.junit.*;
 
@@ -12,6 +15,11 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayDeque;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Created by nguonly role 7/10/15.
@@ -19,20 +27,19 @@ import java.sql.Statement;
 public class CompartmentPlaysRoleTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     /**
      * Prepare data for testing. It's all about compartment.
      */
     public static class Faculty extends Compartment {
-        public void activate(){
+        public void configureBinding(){
             Person p = new Person();
             p.bind(this, Student.class).bind(this, TeachingAssistant.class);
             p.bind(this, Employee.class);
@@ -41,22 +48,19 @@ public class CompartmentPlaysRoleTest {
 
      @Test
     public void compartmentPlaysRoles(){
-         Connection con = DBManager.getConnection();
+         //Connection con = DBManager.getConnection();
+         RegistryManager registryManager = RegistryManager.getInstance();
 
          //compartment as a context
          try (Faculty faculty = Compartment.initialize(Faculty.class)) {
-             faculty.activate();
+             faculty.configureBinding();
 
-             String sql = "SELECT Count(Id) FROM Relation WHERE CompartmentId=%s ORDER BY Id";
-             String query = String.format(sql, faculty.hashCode());
-             try {
-                 //Assert roles being played inside a compartment
-                 Statement stmt = con.createStatement();
-                 ResultSet rs = stmt.executeQuery(query);
-                 Assert.assertEquals(3, rs.getInt(1));
-             } catch (SQLException e) {
-                 e.printStackTrace();
-             }
+             Map<Integer, List<Relation>> maps = registryManager.m_relations.stream()
+                     .filter(r->r.compartmentId == faculty.hashCode())
+                     .collect(Collectors.groupingBy(r->r.roleId));
+
+             Assert.assertEquals(3, maps.keySet().size());
+
          }
 
          //Compartment plays role
@@ -64,34 +68,28 @@ public class CompartmentPlaysRoleTest {
              Faculty faculty = Player.initialize(Faculty.class);
              faculty.bind(Sponsor.class);
 
-             try {
-                 Statement stmt = con.createStatement();
+             Optional<Relation> rel = registryManager.m_relations.stream()
+                     .filter(r -> r.compartmentId == comp.hashCode())
+                     .findFirst();
 
-                 //assert compartment plays role
-                 String query = String.format("SELECT * FROM Relation WHERE CompartmentId=%s ORDER BY Id", comp.hashCode());
-                 ResultSet rs = stmt.executeQuery(query);
-                 rs.next();
-                 Assert.assertTrue(rs.getString("RoleName").contains("Sponsor"));
-             } catch (SQLException e) {
-                 e.printStackTrace();
-             }
+             Assert.assertTrue(rel.get().roleName.contains("Sponsor"));
          }
 
     }
 
     public static class University extends Compartment{
-        public void activate(){
+        public void configureBinding(){
             Faculty faculty = new Faculty();
-            faculty.activate();
+            faculty.configureBinding();
 
             faculty.bind(this, Sponsor.class);
         }
     }
 
     public static class Germany extends Compartment{
-        public void activate(){
+        public void configureBinding(){
             University tuDresden = new University();
-            tuDresden.activate();
+            tuDresden.configureBinding();
 
             tuDresden.bind(this, Competitor.class);
         }
@@ -100,23 +98,15 @@ public class CompartmentPlaysRoleTest {
     @Test
     public void multiLevelCoarseGrained(){
         try(Germany germany = Compartment.initialize(Germany.class)) {
-            germany.activate();
+            germany.configureBinding();
 
-            //play roles in an anonymous compartment
-            germany.bind(EUMember.class);
+            RegistryManager registryManager = RegistryManager.getInstance();
+            Map<Integer, List<Relation>> maps = registryManager.m_relations.stream()
+                    .collect(Collectors.groupingBy(p -> p.compartmentId));
 
-            Connection con = DBManager.getConnection();
-            String query = "SELECT Count(CompartmentId) FROM (SELECT CompartmentId FROM Relation WHERE CompartmentId>0 GROUP BY CompartmentId)";
-            try {
-                Statement stmt = con.createStatement();
-                ResultSet rs = stmt.executeQuery(query);
-                rs.next();
-                //Assert number of explicit compartments
-                Assert.assertEquals(3, rs.getInt(1));
+            //DumpHelper.dumpRelation(registryManager.m_relations);
 
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
+            Assert.assertEquals(3, maps.keySet().size());
         }
     }
 }

@@ -6,10 +6,13 @@ import de.tud.inf.rn.actor.Role;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.RegistryManager;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+
+import java.util.ArrayDeque;
 
 /**
  * Created by nguonly role 7/20/15.
@@ -17,13 +20,12 @@ import org.junit.Test;
 public class InvokeCompartmentMethodTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     static Person p = Player.initialize(Person.class);
@@ -39,7 +41,7 @@ public class InvokeCompartmentMethodTest {
     }
 
     public static class CompartmentA extends Compartment{
-        public void activate(){
+        public void configureBinding(){
             p.bind(this, RoleA.class);
         }
 
@@ -60,11 +62,13 @@ public class InvokeCompartmentMethodTest {
     @Test
     public void invokeCompartmentMethodFromRole(){
         CompartmentA comp = Compartment.initialize(CompartmentA.class);
-        comp.activate();
+        comp.configureBinding();
         String value = "Compartment";
         p.invoke(comp, "setValueInCompartment", new Class[]{String.class}, new Object[]{value});
 
         Assert.assertEquals(value, comp.getValue());
+
+        comp.deActivate();
     }
 
 }

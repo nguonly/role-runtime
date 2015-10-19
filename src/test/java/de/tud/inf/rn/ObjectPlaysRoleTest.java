@@ -5,7 +5,10 @@ import de.tud.inf.rn.actor.Player;
 import de.tud.inf.rn.actor.Role;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
+import de.tud.inf.rn.db.orm.Relation;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.DumpHelper;
+import de.tud.inf.rn.registry.RegistryManager;
 import de.tud.inf.rn.role.*;
 import org.junit.After;
 import org.junit.Before;
@@ -16,6 +19,8 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayDeque;
+import java.util.Iterator;
 
 /**
  * Created by nguonly role 7/10/15.
@@ -23,13 +28,14 @@ import java.sql.Statement;
 public class ObjectPlaysRoleTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager registryManager = RegistryManager.getInstance();
+        registryManager.setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        RegistryManager registryManager = RegistryManager.getInstance();
+        registryManager.setRelations(null);
     }
 
     public static class CompartmentA extends Compartment{
@@ -65,17 +71,11 @@ public class ObjectPlaysRoleTest {
 
             p.unbind(Employee.class);
 
-            try {
-                Connection con = DBManager.getConnection();
-                Statement stmt = con.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM Relation");
-                rs.next();
-                Assert.assertEquals(Student.class.getCanonicalName(), rs.getString("RoleName"));
-                rs.next();
-                Assert.assertEquals(Teacher.class.getCanonicalName(), rs.getString("RoleName"));
-            } catch (Exception e) {
+            RegistryManager registryManager = RegistryManager.getInstance();
+            Iterator<Relation> iterator = registryManager.getRelations().iterator();
 
-            }
+            Assert.assertTrue(iterator.next().getRoleName().contains("Student"));
+            Assert.assertTrue(iterator.next().getRoleName().contains("Teacher"));
         }
     }
 
@@ -89,15 +89,9 @@ public class ObjectPlaysRoleTest {
 
             p.unbindAll();
 
-            try {
-                Connection con = DBManager.getConnection();
-                String query = "SELECT * FROM Relation FROM ObjectId=" + p.hashCode();
-                Statement stmt = con.createStatement();
-                ResultSet rs = stmt.executeQuery(query);
-                Assert.assertEquals(false, rs.next());
+            RegistryManager registryManager = RegistryManager.getInstance();
 
-            } catch (Exception e) {
-            }
+            Assert.assertTrue(registryManager.getRelations().isEmpty());
         }
     }
 
@@ -110,36 +104,25 @@ public class ObjectPlaysRoleTest {
             p.unbind(Employee.class);
             p.bind(Employee.class);
 
-            Connection con = DBManager.getConnection();
-            String query = "SELECT * FROM Relation ORDER BY Id";
-            try {
-                Statement stmt = con.createStatement();
-                ResultSet rs = stmt.executeQuery(query);
-                rs.next();
-                System.out.println(rs.getString("RoleName"));
-                Assert.assertTrue(rs.getString("RoleName").contains("Student"));
-                rs.next();
-                Assert.assertTrue(rs.getString("RoleName").contains("Employee"));
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
+            RegistryManager registryManager = RegistryManager.getInstance();
+
+            Iterator<Relation> iterator = registryManager.getRelations().iterator();
+
+            Assert.assertTrue(iterator.next().getRoleName().contains("Student"));
+            Assert.assertTrue(iterator.next().getRoleName().contains("Employee"));
         }
     }
 
     @Test
     public void prohibitConstraint(){
-        Person p = new Person();
-        p.bind(Employee.class);
-        p.prohibit(Student.class);
+        try(Compartment comp = Compartment.initialize(Compartment.class)) {
+            Person p = new Person();
+            p.bind(Employee.class).prohibit(Student.class);
+            //p.prohibit(Student.class); //This is not a case
 
-        try{
-            Connection con = DBManager.getConnection();
-            Statement stmt = con.createStatement();
-            String query = "SELECT * FROM Relation WHERE RoldId=-1 AND RoleName LIKE('%Student')";
-            ResultSet rs = stmt.executeQuery(query);
-            Assert.assertEquals(true, rs.next());
-        }catch(Exception e){
+            RegistryManager registryManager = RegistryManager.getInstance();
 
+            //DumpHelper.dumpRelation(registryManager.m_relations);
         }
     }
 

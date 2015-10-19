@@ -3,10 +3,13 @@ package de.tud.inf.rn;
 import de.tud.inf.rn.actor.Compartment;
 import de.tud.inf.rn.db.DBManager;
 import de.tud.inf.rn.db.SchemaManager;
+import de.tud.inf.rn.db.orm.Relation;
 import de.tud.inf.rn.player.Person;
+import de.tud.inf.rn.registry.RegistryManager;
 import de.tud.inf.rn.role.Employee;
 import de.tud.inf.rn.role.Student;
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -14,6 +17,8 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayDeque;
+import java.util.Iterator;
 
 import static org.junit.Assert.assertTrue;
 
@@ -23,13 +28,12 @@ import static org.junit.Assert.assertTrue;
 public class RoleDependOnCompartmentTest {
     @Before
     public void setupSchema(){
-        SchemaManager.drop();
-        SchemaManager.create();
+        RegistryManager.getInstance().setRelations(new ArrayDeque<>());
     }
 
     @After
     public void destroyDBConnection(){
-        DBManager.close();
+        RegistryManager.getInstance().setRelations(null);
     }
 
     class Faculty extends Compartment {
@@ -42,19 +46,13 @@ public class RoleDependOnCompartmentTest {
 
     @Test
     public void roleDependsOnCompartment(){
-        Faculty faculty = new Faculty();
+        //try(Compartment comp = Compartment.initialize(Compartment.class)) {
+            Faculty faculty = new Faculty();
 
-        Connection con = DBManager.getConnection();
-        String query = "SELECT * FROM Relation";
-        try {
-            Statement stmt = con.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
-            rs.next();
-            assertTrue(rs.getInt("CompartmentId") > 0);
-            rs.next();
-            assertTrue(rs.getString("RoleName").contains("Employee"));
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+            RegistryManager registryManager = RegistryManager.getInstance();
+            Iterator<Relation> iterator = registryManager.getRelations().iterator();
+            Assert.assertTrue(iterator.next().getCompartmentId()>0);
+            Assert.assertTrue(iterator.next().getRoleName().contains("Employee"));
+        //}
     }
 }

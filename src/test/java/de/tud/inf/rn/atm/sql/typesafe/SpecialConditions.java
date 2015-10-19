@@ -12,9 +12,6 @@ public class SpecialConditions extends Compartment {
         account.bind(BonusAccount.class);
     }
 
-    public void activate(){
-
-    }
 
 
 }
