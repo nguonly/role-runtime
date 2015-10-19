@@ -12,24 +12,49 @@ public class Role {
 
     RegistryManager registryManager = RegistryManager.getInstance();
 
-    public void inherit(Compartment compartment, String superRole){
-        String fullRole = String.format(m_packageStr, superRole);
-        registryManager.inherit(compartment, this, fullRole);
+    /* Inheritance */
+    public <T extends Role> T inherit(Compartment compartment, Class<T> superRole){
+        return registryManager.inherit(compartment, this, superRole, null, null);
     }
 
-    public void inherit(String superRole){
-        inherit(null, superRole);
+    public <T extends Role> T inherit(Compartment compartment, Class<T> superRole, Class[] constructorArgumentTypes,
+                                      Object[] constructorArgumentValues){
+        return registryManager.inherit(compartment, this, superRole, constructorArgumentTypes, constructorArgumentValues);
     }
 
-    public Role bind(Compartment compartment, Class role){
-
-        //String fullRole = String.format(m_packageStr, role);
-        return registryManager.rolePlaysRole(compartment, this, role);
+    public <T extends Role> T inherit(Class<T> superRole){
+        return registryManager.inherit(null, this, superRole, null, null);
     }
 
-    public Role bind(Class role){
+    public <T extends Role> T inherit(Class<T> superRole, Class[] constructorArgumentTypes,
+                                      Object[] constructorArgumentValues){
+        return registryManager.inherit(null, this, superRole, constructorArgumentTypes, constructorArgumentValues);
+    }
+
+    /* End of Inheritance */
+
+    /* Bind operations */
+
+    public <T extends Role> T bind(Compartment compartment, Class<T> role){
+        return registryManager.rolePlaysRole(compartment, this, role, null, null);
+    }
+
+    public <T extends Role> T bind(Compartment compartment, Class<T> role,
+                                   Class[] constructorArgumentTypes,
+                                   Object[] constructorArgumentValues){
+        return registryManager.rolePlaysRole(compartment, this, role, constructorArgumentTypes, constructorArgumentValues);
+    }
+
+    public <T extends Role> T bind(Class<T> role){
         return bind(null, role);
     }
+
+    public <T extends Role> T bind(Class<T> role, Class[] constructorArgumentTypes,
+                                   Object[] constructorArgumentValues){
+        return registryManager.rolePlaysRole(null, this, role, constructorArgumentTypes, constructorArgumentValues);
+    }
+
+    /* End of Bind operation */
 
     public void unbind(Class role){
 
@@ -75,42 +100,42 @@ public class Role {
         registryManager.invokeBase(this, methodName, null, null, null);
     }
 
-    /* Invoke compartment method */
-    public <T> T invokeCompartment(Compartment compartment, String methodName, Class<T> returnType, Class[] arguementTypes,  Object[] argumentValues){
-        return registryManager.invokeCompartment(compartment, false, this, methodName, returnType, arguementTypes, argumentValues);
-    }
-
-    public <T> T invokeCompartment(Compartment compartment, String methodName, Class<T> returnType){
-        return registryManager.invokeCompartment(compartment, false, this, methodName, returnType, null, null);
-    }
-
-    public void invokeCompartment(Compartment compartment, String methodName, Class[] argumentTypes, Object[] argumentValues){
-        registryManager.invokeCompartment(compartment, false, this, methodName, null, argumentTypes, argumentValues);
-    }
-
-    public void invokeCompartment(Compartment compartment, String methodName){
-        registryManager.invokeCompartment(compartment, false, this, methodName, null, null, null);
-    }
-
-    /* End of invoke compartment mehtod */
-
     /* invoke compartment method with current active compartment */
     public <T> T invokeCompartment(String methodName, Class<T> returnType, Class[] arguementTypes,  Object[] argumentValues){
-        return registryManager.invokeCompartment(null, false, this, methodName, returnType, arguementTypes, argumentValues);
+        return registryManager.invokeCompartment(false, this, methodName, returnType, arguementTypes, argumentValues);
     }
 
     public <T> T invokeCompartment(String methodName, Class<T> returnType){
-        return registryManager.invokeCompartment(null, false, this, methodName, returnType, null, null);
+        return registryManager.invokeCompartment(false, this, methodName, returnType, null, null);
     }
 
     public void invokeCompartment(String methodName, Class[] argumentType, Object[] argumentValues){
-        registryManager.invokeCompartment(null, false, this, methodName, null, argumentType, argumentValues);
+        registryManager.invokeCompartment(false, this, methodName, null, argumentType, argumentValues);
     }
 
     public void invokeCompartment(String methodName){
-        registryManager.invokeCompartment(null, false, this, methodName, null, null, null);
+        registryManager.invokeCompartment(false, this, methodName, null, null, null);
     }
     /* end of invoke compartment method with current active compartment */
+
+    /* Invoke root */
+    public <T> T invokeCore(String methodName, Class<T> returnType, Class[] arguementTypes, Object[] argumentValues){
+        return registryManager.invokeCore(this, methodName, returnType, arguementTypes, argumentValues);
+    }
+
+    public <T> T invokeCore(String methodName, Class<T> returnType){
+        return registryManager.invokeCore(this, methodName, returnType, null, null);
+    }
+
+    public void invokeCore(String methodName, Class[] argumentType, Object[] argumentValues){
+        registryManager.invokeCore(this, methodName, null, argumentType, argumentValues);
+    }
+
+    public void invokeCore(String methodName){
+        registryManager.invokeCore(this, methodName, null, null, null);
+    }
+
+    /* End of invoke root */
 
     /* type safe base reference */
     public <T> T base(Compartment compartment, Class<T> baseClass){
@@ -128,4 +153,34 @@ public class Role {
     public <T> T compartment(Class<T> compartmentClass){
         return registryManager.compartment(null, compartmentClass);
     }
+
+    public Object getRootPlayer(){
+        return registryManager.getRootPlayer(null, this);
+    }
+
+    public Object[] getRootPlayer(Class role){
+        return registryManager.getRootPlayer(null, role);
+    }
+
+    public <T> T role(Compartment compartment, Class<T> roleClass){
+        return registryManager.role(compartment, this, roleClass);
+    }
+
+    public <T> T role(Class<T> roleClass){
+        return registryManager.role(null, this, roleClass);
+    }
+
+    public Object getPlayer(){
+        return registryManager.getPlayer(null, this);
+    }
+
+    public Object getPlayer(Compartment compartment){
+        return registryManager.getPlayer(compartment, this);
+    }
+
+    public Object getCompartment(){
+        return registryManager.getCompartment(this);
+    }
+
+
 }
